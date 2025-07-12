@@ -1,4 +1,6 @@
 .Rprofile
 .Rdata
 .Rproj.user
+.Rhistory
 renv/
+*.Rproj
