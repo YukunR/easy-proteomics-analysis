@@ -21,6 +21,7 @@ library(RColorBrewer)
 #' @param desc_col Column name for protein descriptions, default "Description"
 #' @param output_dir Output directory path
 #' @param sep Separator for handling multiple IDs, default ";"
+#' @param handle_duplicates How to handle duplicate IDs: "error", "interactive", "first", "last", "aggregate"
 #' 
 #' @return List containing two elements:
 #'   \item{expression_data}{Expression data matrix}
@@ -32,7 +33,8 @@ separate_protein_data <- function(protein_data,
                                   gene_col = "GeneName", 
                                   desc_col = "Description",
                                   output_dir = "./",
-                                  sep = ";") {
+                                  sep = ";",
+                                  handle_duplicates = "error") {
   
   # Check if required columns exist
   required_cols <- c(id_col, gene_col, desc_col)
@@ -47,7 +49,100 @@ separate_protein_data <- function(protein_data,
                                           sep = sep)
   protein_data_separated <- as.data.frame(protein_data_separated)
   
-  # Set row names as protein IDs
+  # Check for duplicate IDs
+  protein_ids <- protein_data_separated[[id_col]]
+  duplicate_ids <- protein_ids[duplicated(protein_ids) | duplicated(protein_ids, fromLast = TRUE)]
+  duplicate_ids <- unique(duplicate_ids)
+  
+  if (length(duplicate_ids) > 0) {
+    cat("Duplicate protein IDs detected:\n")
+    
+    # Show detailed information for duplicate IDs
+    for (dup_id in duplicate_ids) {
+      dup_rows <- which(protein_data_separated[[id_col]] == dup_id)
+      cat(sprintf("\nID: %s (appears %d times)\n", dup_id, length(dup_rows)))
+      
+      # Show key information for duplicate rows
+      dup_data <- protein_data_separated[dup_rows, c(id_col, gene_col, desc_col)]
+      print(dup_data)
+      
+      # Check if expression data is identical
+      expr_cols <- !colnames(protein_data_separated) %in% c(id_col, gene_col, desc_col)
+      expr_data_dup <- protein_data_separated[dup_rows, expr_cols, drop = FALSE]
+      
+      if (nrow(expr_data_dup) > 1) {
+        identical_expr <- all(apply(expr_data_dup, 2, function(x) length(unique(x)) == 1))
+        cat(sprintf("Expression data identical: %s\n", ifelse(identical_expr, "Yes", "No")))
+      }
+    }
+    
+    # Handle duplicates based on strategy
+    if (handle_duplicates == "error") {
+      stop(paste("Duplicate protein IDs found:", paste(duplicate_ids, collapse = ", "), 
+                 "\nPlease check your data or use other handling strategies (first/last/aggregate/interactive)"))
+      
+    } else if (handle_duplicates == "interactive") {
+      cat("\nPlease choose how to handle duplicate IDs:\n")
+      cat("1. Keep first occurrence\n")
+      cat("2. Keep last occurrence\n") 
+      cat("3. Average expression data (only when annotation is identical)\n")
+      cat("4. Stop execution to manually fix original file\n")
+      
+      choice <- readline(prompt = "Enter your choice (1-4): ")
+      
+      if (choice == "1") {
+        handle_duplicates <- "first"
+      } else if (choice == "2") {
+        handle_duplicates <- "last"
+      } else if (choice == "3") {
+        handle_duplicates <- "aggregate"
+      } else {
+        stop("Execution stopped. Please fix duplicate IDs in your original data file.")
+      }
+    }
+    
+    # Execute duplicate handling
+    if (handle_duplicates == "first") {
+      protein_data_separated <- protein_data_separated[!duplicated(protein_data_separated[[id_col]]), ]
+      cat("Kept first occurrence for each duplicate ID\n")
+      
+    } else if (handle_duplicates == "last") {
+      protein_data_separated <- protein_data_separated[!duplicated(protein_data_separated[[id_col]], fromLast = TRUE), ]
+      cat("Kept last occurrence for each duplicate ID\n")
+      
+    } else if (handle_duplicates == "aggregate") {
+      # Check if aggregation is safe
+      can_aggregate <- TRUE
+      for (dup_id in duplicate_ids) {
+        dup_rows <- which(protein_data_separated[[id_col]] == dup_id)
+        dup_annotations <- protein_data_separated[dup_rows, c(gene_col, desc_col)]
+        
+        if (!all(apply(dup_annotations, 2, function(x) length(unique(x)) == 1))) {
+          cat(sprintf("Warning: ID %s has inconsistent annotation, cannot safely aggregate\n", dup_id))
+          can_aggregate <- FALSE
+        }
+      }
+      
+      if (!can_aggregate) {
+        stop("Cannot aggregate: duplicate IDs with inconsistent annotations found. Please choose another handling method.")
+      }
+      
+      # Perform aggregation
+      expr_cols <- !colnames(protein_data_separated) %in% c(id_col, gene_col, desc_col)
+      
+      # Average expression data
+      aggregated_data <- protein_data_separated %>%
+        group_by(across(all_of(c(id_col, gene_col, desc_col)))) %>%
+        summarise(across(all_of(colnames(protein_data_separated)[expr_cols]), mean, na.rm = TRUE),
+                  .groups = 'drop') %>%
+        as.data.frame()
+      
+      protein_data_separated <- aggregated_data
+      cat("Averaged expression data for duplicate IDs\n")
+    }
+  }
+  
+  # Set row names as protein IDs (should be unique now)
   rownames(protein_data_separated) <- protein_data_separated[[id_col]]
   
   # Separate annotation information
@@ -63,6 +158,21 @@ separate_protein_data <- function(protein_data,
   write.csv(annotation_data, 
             file = file.path(output_dir, "protein_annotations.csv"), 
             row.names = FALSE)
+  
+  # Save duplicate handling report if duplicates were processed
+  if (length(duplicate_ids) > 0) {
+    report <- data.frame(
+      Processing_Time = Sys.time(),
+      Duplicate_Count = length(duplicate_ids),
+      Duplicate_IDs = paste(duplicate_ids, collapse = "; "),
+      Handling_Method = handle_duplicates,
+      stringsAsFactors = FALSE
+    )
+    write.csv(report, 
+              file = file.path(output_dir, "duplicate_handling_report.csv"), 
+              row.names = FALSE)
+    cat(sprintf("Duplicate handling report saved to: %s\n", file.path(output_dir, "duplicate_handling_report.csv")))
+  }
   
   return(list(
     expression_data = expression_data,
