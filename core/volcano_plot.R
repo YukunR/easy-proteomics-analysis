@@ -439,7 +439,7 @@ create_volcano_plot <- function(gene_data,
                        expand = expansion(add=c(0.1, 0.3))) +
     
     labs(title = title,
-         subtitle = paste0("FC threshold: ±", fc_threshold, 
+         subtitle = paste0("log2FC threshold: ±", log2(fc_threshold), 
                            ", P-value threshold: ", p_threshold)) +
     
     # Apply theme

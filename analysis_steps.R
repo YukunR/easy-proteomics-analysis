@@ -248,6 +248,14 @@ step_differential_analysis_single <- function(workspace, group_name, config = NU
     file = paste0(group_output_dir, "regulated_data.csv"), 
     row.names = FALSE
   )
+
+  # Save volcano plot
+  ggsave(
+    filename = paste0(group_output_dir, "volcano_plot.pdf"), 
+    plot = volcano_results$plot, 
+    width = 7, 
+    height = 7
+  )
   
   # ==== Enrichment analysis ====
   enrich_output_dir <- paste0(group_output_dir, "/enrichment_results/")
