@@ -140,6 +140,146 @@ step_pca <- function(workspace) {
   return("PCA completed")
 }
 
+# ===========================================
+# ========= Step 2.5: Batch Removal =========
+# ===========================================
+
+step_batch_removal <- function(workspace) {
+  log_message(workspace, "Starting batch removal assessment")
+  
+  source("core/batch_removal.R", local = TRUE)
+  
+  # Load results from previous steps
+  norm_results <- readRDS(file.path(workspace$base_dir, "normalization_results.rds"))
+  
+  # Display PCA plot for assessment
+  pca_plot_path <- file.path(workspace$base_dir, "pca_results/pca_biplot_PC1_PC2.pdf")
+  display_pca_for_batch_assessment(pca_plot_path)
+  
+  # Ask user if batch removal is needed
+  cat("\nDo you want to perform batch removal? (y/n): ")
+  response <- readline()
+  
+  if (!tolower(response) %in% c("y", "yes")) {
+    log_message(workspace, "Batch removal skipped by user")
+    
+    # Save decision for record
+    saveRDS(list(
+      batch_removal_performed = FALSE,
+      imputed_data = norm_results$imputed_data,
+      protein_abundance_data = norm_results$protein_abundance_data,
+      protein_annotation = norm_results$protein_annotation,
+      color_scheme = norm_results$color_scheme,
+      sample_info = norm_results$sample_info,
+      config = norm_results$config
+    ), file.path(workspace$base_dir, "batch_removal_results.rds"))
+    
+    return("Batch removal skipped")
+  }
+  
+  # Collect batch information
+  batch_info <- collect_batch_info(norm_results$sample_info)
+  
+  # Ask for reference batch (optional)
+  unique_batches <- unique(batch_info$Batch)
+  cat("\nAvailable batches:", paste(unique_batches, collapse = ", "), "\n")
+  cat("Specify reference batch (press Enter to use default): ")
+  ref_batch <- readline()
+  if (ref_batch == "") ref_batch <- NULL
+  
+  # Make output directory
+  batch_output_dir <- paste0(workspace$base_dir, "/batch_removal_results/")
+  if (!dir.exists(batch_output_dir)) {
+    dir.create(batch_output_dir, recursive = TRUE)
+  }
+  
+  # Save batch information
+  write.csv(batch_info, file.path(batch_output_dir, "batch_assignments.csv"), row.names = FALSE)
+  
+  # Perform batch removal
+  log_message(workspace, "Performing batch removal using ComBat")
+  
+  corrected_abundance <- remove_batch_effects(
+    expression_data = norm_results$protein_abundance_data,
+    batch_info = batch_info,
+    sample_info = norm_results$sample_info,
+    ref_batch = ref_batch,
+    group_col = "Group",
+    id_col = "Accession",
+    log_transform = TRUE
+  )
+  
+  # Also correct the log2-transformed data for downstream analysis
+  imputed_data_df <- norm_results$imputed_data %>% 
+    as.data.frame() %>%
+    tibble::rownames_to_column("Accession")
+  
+  corrected_log2 <- remove_batch_effects(
+    expression_data = imputed_data_df,
+    batch_info = batch_info,
+    sample_info = norm_results$sample_info,
+    ref_batch = ref_batch,
+    group_col = "Group",
+    id_col = "Accession",
+    log_transform = FALSE  # Already log2-transformed
+  )
+  
+  # Convert back to matrix format for imputed_data
+  corrected_imputed_matrix <- corrected_log2 %>%
+    tibble::column_to_rownames("Accession") %>%
+    as.matrix()
+  
+  # Visualize batch correction effects
+  visualize_batch_correction(
+    original_data = norm_results$protein_abundance_data,
+    corrected_data = corrected_abundance,
+    batch_info = batch_info,
+    sample_info = norm_results$sample_info,
+    output_dir = batch_output_dir
+  )
+  
+  # Re-run PCA on corrected data for comparison
+  cat("\nRe-running PCA on batch-corrected data...\n")
+  pca_corrected_dir <- paste0(batch_output_dir, "/pca_after_correction/")
+  if (!dir.exists(pca_corrected_dir)) {
+    dir.create(pca_corrected_dir, recursive = TRUE)
+  }
+  
+  source("core/pca.R", local = TRUE)
+  
+  pca_corrected <- run_comprehensive_pca(
+    expression_data = corrected_log2,
+    sample_info = norm_results$sample_info,
+    group_colors = norm_results$color_scheme,
+    output_dir = pca_corrected_dir,
+    plot_width = 10,
+    plot_height = 12
+  )
+  
+  # Save corrected data for subsequent steps
+  saveRDS(list(
+    batch_removal_performed = TRUE,
+    batch_info = batch_info,
+    ref_batch = ref_batch,
+    imputed_data = corrected_imputed_matrix,
+    protein_abundance_data = corrected_abundance,
+    protein_annotation = norm_results$protein_annotation,
+    color_scheme = norm_results$color_scheme,
+    sample_info = norm_results$sample_info,
+    config = norm_results$config,
+    original_data = list(
+      imputed_data = norm_results$imputed_data,
+      protein_abundance_data = norm_results$protein_abundance_data
+    )
+  ), file.path(workspace$base_dir, "batch_removal_results.rds"))
+  
+  log_message(workspace, "Batch removal completed successfully")
+  cat("\nBatch removal completed. Results saved to:", batch_output_dir, "\n")
+  cat("Please review the comparison plots to verify batch effect removal.\n")
+  
+  return("Batch removal completed")
+}
+
 # =====================================================
 # ========= Step 3: Prepare Comparison Groups =========
 # =====================================================
@@ -152,12 +292,21 @@ step_prepare_comparisons <- function(workspace, config = NULL) {
   # Generate comparison groups
   source("core/comparison_groups.R", local = TRUE)
   
-  # Load normalization results
-  norm_results <- readRDS(file.path(workspace$base_dir, "normalization_results.rds"))
+  # Check if batch removal was performed
+  batch_removal_file <- file.path(workspace$base_dir, "batch_removal_results.rds")
+  if (file.exists(batch_removal_file)) {
+    data_source <- readRDS(batch_removal_file)
+    if (data_source$batch_removal_performed) {
+      log_message(workspace, "Using batch-corrected data for comparison groups")
+    }
+  } else {
+    # Fall back to normalization results
+    data_source <- readRDS(file.path(workspace$base_dir, "normalization_results.rds"))
+  }
   
   comparison_groups <- create_comparison_groups(
-    expression_data = norm_results$protein_abundance_data,
-    sample_info = norm_results$sample_info,
+    expression_data = data_source$protein_abundance_data,
+    sample_info = data_source$sample_info,
     comparisons = config$comparisons
   )
   print_comparison_summary(comparison_groups)
@@ -180,8 +329,16 @@ step_differential_analysis_single <- function(workspace, group_name, config = NU
   
   # Load necessary data
   comparison_groups <- readRDS(file.path(workspace$base_dir, "comparison_groups.rds"))
-  norm_results <- readRDS(file.path(workspace$base_dir, "normalization_results.rds"))
-  protein_annotation <- norm_results$protein_annotation
+  
+  # Check if batch removal was performed
+  batch_removal_file <- file.path(workspace$base_dir, "batch_removal_results.rds")
+  if (file.exists(batch_removal_file)) {
+    data_source <- readRDS(batch_removal_file)
+  } else {
+    data_source <- readRDS(file.path(workspace$base_dir, "normalization_results.rds"))
+  }
+  
+  protein_annotation <- data_source$protein_annotation
   
   if (!group_name %in% names(comparison_groups)) {
     stop(paste("Comparison group", group_name, "does not exist"))
@@ -382,6 +539,17 @@ run_proteomics_analysis <- function(project_name = "proteomics_project", force_r
     output_files = c("pca_results/pca_biplot_PC1_PC2.pdf"),
     dependencies = "normalization",
     cleanup_patterns = c("pca_results/.*")
+  )
+  
+  # Step 2.5: Batch Removal (Optional)
+  cat("\n=== Step 2.5: Batch Removal (Optional) ===\n")
+  execute_step(
+    workspace = workspace,
+    step_name = "batch_removal",
+    step_function = step_batch_removal,
+    output_files = c("batch_removal_results.rds"),
+    dependencies = c("normalization", "pca"),
+    cleanup_patterns = c("batch_removal_results/.*")
   )
   
   # Step 3: Prepare comparison groups
