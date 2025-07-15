@@ -760,6 +760,13 @@ run_gsea_workflow <- function(gene_data,
       qvalue_cutoff = gsea_qvalue_cutoff
     )
   )
+
+  # Set significant_pathways to 0 if missing (i.e., no significant pathways found)
+  summary_stats$significant_pathways <- ifelse(
+    is.na(summary_stats$significant_pathways), 
+    0, 
+    summary_stats$significant_pathways
+  )
   
   # Export summary
   writeLines(
