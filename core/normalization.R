@@ -44,10 +44,17 @@ separate_protein_data <- function(protein_data,
   }
   
   # Handle multiple IDs separated by delimiter
-  protein_data_separated <- separate_rows(protein_data, 
-                                          all_of(c(id_col, gene_col, desc_col)), 
-                                          sep = sep)
-  protein_data_separated <- as.data.frame(protein_data_separated)
+  # Check if `id_col` contains the specified delimiter
+  contain_delimiter <- any(sep %in% protein_data[[id_col]])
+  if (contain_delimiter) {
+    protein_data_separated <- separate_rows(protein_data, 
+                                            all_of(c(id_col, gene_col, desc_col)), 
+                                            sep = sep)
+    protein_data_separated <- as.data.frame(protein_data_separated)
+  } else {
+    # In case the delimiter is incorrectly recognized
+    protein_data_separated <- as.data.frame(protein_data)
+  }
   
   # Check for duplicate IDs
   protein_ids <- protein_data_separated[[id_col]]
