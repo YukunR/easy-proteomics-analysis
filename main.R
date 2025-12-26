@@ -28,7 +28,12 @@ imputation_method <- "knn"  # should be one of "knn" and "perseus"
 # Ensure that the group names below match the group names used in sample_info
 comparisons <- list(
   list(control = "HC", treatment = "NC", name = "HC_vs_NC"),
-  list(control = "HD", treatment = "HC", name = "HD_vs_HC")
+  list(control = "HD", treatment = "HC", name = "HD_vs_HC"),
+  list(control = c("HC", "HD"), treatment = "NC", name = "NC_vs_Rest"), 
+  list(control = "HD", treatment = c("HC", "NC"), name = "Rest_vs_HD"), 
+  list(control = "HC", treatment = c("HD", "NC"), name = "Rest_vs_HC")
+  # This causes an error because NC appears in both the control and treatment groups.
+  # list(control = c"HC", treatment = c("HD", "NC"), name = "Rest_vs_HC")
 )
 
 # ==== Enrichment analysis ====
