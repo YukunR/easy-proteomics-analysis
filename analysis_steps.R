@@ -54,7 +54,10 @@ step_normalization <- function(workspace, config = NULL) {
   # One-step processing
   separated_data <- separate_protein_data(protein_data, output_dir = norm_output_dir)
   calculate_na_percentage(separated_data$expression_data, output_dir = norm_output_dir)
-  normalized_data <- normalize_by_median(separated_data$expression_data)
+  normalized_data <- normalize_by_median(
+    separated_data$expression_data, 
+    sample_info, 
+    normalization_method = config$normalization_method)
   log2_data <- log2_transform(normalized_data)
   imputed_data <- filter_and_impute(
     log2_data, 
