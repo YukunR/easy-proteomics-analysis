@@ -2,7 +2,7 @@
 # PROTEOMICS GSEA ANALYSIS FUNCTIONS
 # ==============================================================================
 # Enhanced functions for Gene Set Enrichment Analysis (GSEA) with modern features
-# 
+#
 # Features:
 # - Modern progress bars with progress package
 # - Flexible parameter control
@@ -27,7 +27,7 @@
 #                                     fc_column = "log2FC", p_column = "p.adjust")
 #
 # 3. Complete workflow with plots:
-#    results <- run_gsea_workflow(gene_data, term2gene, term2name, 
+#    results <- run_gsea_workflow(gene_data, term2gene, term2name,
 #                                output_dir = "gsea_results/")
 #
 # ==============================================================================
@@ -58,23 +58,23 @@ library(patchwork)
 #'
 #' @examples
 #' sanitize_filename("Pathway / with special chars: <test>")
-#' 
+#'
 #' @export
 sanitize_filename <- function(filename, replacement = "_", max_length = 100) {
   # Remove or replace invalid characters
   filename <- str_replace_all(filename, "[<>:\"/\\|?*]", replacement)
-  
+
   # Replace multiple consecutive replacement characters with single one
   filename <- str_replace_all(filename, paste0(replacement, "+"), replacement)
-  
+
   # Remove leading/trailing replacement characters
   filename <- str_replace_all(filename, paste0("^", replacement, "+|", replacement, "+$"), "")
-  
+
   # Truncate if too long
   if (nchar(filename) > max_length) {
     filename <- paste0(substr(filename, 1, max_length - 3), "...")
   }
-  
+
   return(filename)
 }
 
@@ -91,47 +91,48 @@ sanitize_filename <- function(filename, replacement = "_", max_length = 100) {
 #' @return Validated and standardized gene data
 #'
 #' @export
-validate_gsea_input <- function(gene_data, 
-                                gene_column = "Gene", 
-                                fc_column = "FC", 
+validate_gsea_input <- function(gene_data,
+                                gene_column = "Gene",
+                                fc_column = "FC",
                                 p_column = "p") {
-  
   # Check if required columns exist
   required_cols <- c(gene_column, fc_column, p_column)
   missing_cols <- setdiff(required_cols, colnames(gene_data))
-  
+
   if (length(missing_cols) > 0) {
-    stop(paste("Missing required columns:", paste(missing_cols, collapse = ", "),
-               "\nAvailable columns:", paste(colnames(gene_data), collapse = ", ")))
+    stop(paste(
+      "Missing required columns:", paste(missing_cols, collapse = ", "),
+      "\nAvailable columns:", paste(colnames(gene_data), collapse = ", ")
+    ))
   }
-  
+
   # Remove rows with NA values
   initial_rows <- nrow(gene_data)
   gene_data <- gene_data[complete.cases(gene_data[, required_cols]), ]
-  
+
   if (nrow(gene_data) < initial_rows) {
     message(paste("Removed", initial_rows - nrow(gene_data), "rows with NA values"))
   }
-  
+
   # Check for duplicate genes
   if (any(duplicated(gene_data[[gene_column]]))) {
     warning("Duplicate genes found. Using the first occurrence of each gene.")
     gene_data <- gene_data[!duplicated(gene_data[[gene_column]]), ]
   }
-  
+
   # Validate fold change values
   fc_values <- gene_data[[fc_column]]
   if (any(is.infinite(fc_values))) {
     warning("Infinite fold change values found. These will be removed.")
     gene_data <- gene_data[!is.infinite(fc_values), ]
   }
-  
+
   # Validate p-values
   p_values <- gene_data[[p_column]]
   if (any(p_values < 0 | p_values > 1)) {
     warning("P-values outside [0,1] range found. Please check your data.")
   }
-  
+
   return(gene_data)
 }
 
@@ -156,20 +157,19 @@ prepare_gene_list <- function(gene_data,
                               p_column = "p",
                               p_threshold = 1,
                               ranking_method = c("fc", "signed_p", "combined")) {
-  
   ranking_method <- match.arg(ranking_method)
-  
+
   # Filter by p-value if specified
   if (p_threshold < 1) {
     gene_data <- gene_data[gene_data[[p_column]] <= p_threshold, ]
     message(paste("Filtered to", nrow(gene_data), "genes with p <=", p_threshold))
   }
-  
+
   # Extract values
   genes <- gene_data[[gene_column]]
   fc_values <- gene_data[[fc_column]]
   p_values <- gene_data[[p_column]]
-  
+
   # Convert fold change to log2 if needed
   if (all(fc_values > 0) && any(fc_values != 1)) {
     # Check if values look like linear fold changes
@@ -178,7 +178,7 @@ prepare_gene_list <- function(gene_data,
       fc_values <- log2(fc_values)
     }
   }
-  
+
   # Calculate ranking scores based on method
   if (ranking_method == "fc") {
     scores <- fc_values
@@ -189,13 +189,13 @@ prepare_gene_list <- function(gene_data,
     # Combine fold change and p-value
     scores <- fc_values * (-log10(p_values))
   }
-  
+
   # Create named vector
   names(scores) <- genes
-  
+
   # Sort in decreasing order
   scores <- sort(scores, decreasing = TRUE)
-  
+
   return(scores)
 }
 
@@ -228,7 +228,7 @@ prepare_gene_list <- function(gene_data,
 #'
 #' @examples
 #' gsea_results <- run_gsea_analysis(gene_data, term2gene, term2name)
-#' 
+#'
 #' @export
 run_gsea_analysis <- function(gene_data,
                               term2gene,
@@ -245,21 +245,22 @@ run_gsea_analysis <- function(gene_data,
                               nperm = 1000,
                               seed = 42,
                               verbose = TRUE) {
-  
   if (verbose) cat("Starting GSEA analysis...\n")
-  
+
   # Validate input data
   gene_data <- validate_gsea_input(gene_data, gene_column, fc_column, p_column)
-  
+
   # Prepare gene list
-  gene_list <- prepare_gene_list(gene_data, gene_column, fc_column, p_column, 
-                                 p_threshold, ranking_method)
-  
+  gene_list <- prepare_gene_list(
+    gene_data, gene_column, fc_column, p_column,
+    p_threshold, ranking_method
+  )
+
   if (verbose) {
     cat("Prepared gene list with", length(gene_list), "genes\n")
     cat("Range of scores:", round(range(gene_list), 3), "\n")
   }
-  
+
   # Validate term2gene and term2name
   if (ncol(term2gene) != 2) {
     stop("term2gene must have exactly 2 columns")
@@ -267,33 +268,38 @@ run_gsea_analysis <- function(gene_data,
   if (ncol(term2name) != 2) {
     stop("term2name must have exactly 2 columns")
   }
-  
+
   # Set seed for reproducibility
   set.seed(seed)
-  
+
   # Run GSEA
   if (verbose) cat("Running GSEA enrichment...\n")
-  
-  gsea_result <- tryCatch({
-    GSEA(geneList = gene_list,
-         TERM2GENE = term2gene,
-         TERM2NAME = term2name,
-         pvalueCutoff = gsea_pvalue_cutoff,
-         pAdjustMethod = "BH",
-         minGSSize = min_gs_size,
-         maxGSSize = max_gs_size,
-         eps = 1e-10,
-         nPermSimple = nperm,
-         verbose = verbose)
-  }, error = function(e) {
-    stop(paste("GSEA analysis failed:", e$message))
-  })
-  
+
+  gsea_result <- tryCatch(
+    {
+      GSEA(
+        geneList = gene_list,
+        TERM2GENE = term2gene,
+        TERM2NAME = term2name,
+        pvalueCutoff = gsea_pvalue_cutoff,
+        pAdjustMethod = "BH",
+        minGSSize = min_gs_size,
+        maxGSSize = max_gs_size,
+        eps = 1e-10,
+        nPermSimple = nperm,
+        verbose = verbose
+      )
+    },
+    error = function(e) {
+      stop(paste("GSEA analysis failed:", e$message))
+    }
+  )
+
   if (verbose) {
     n_significant <- sum(gsea_result@result$qvalue < gsea_qvalue_cutoff)
     cat("GSEA completed! Found", n_significant, "significant gene sets\n")
   }
-  
+
   return(gsea_result)
 }
 
@@ -318,7 +324,7 @@ run_gsea_analysis <- function(gene_data,
 #'
 #' @examples
 #' ridge_plot <- create_ridge_plot(gsea_results, show_category = 30)
-#' 
+#'
 #' @export
 create_ridge_plot <- function(gsea_result,
                               show_category = 20,
@@ -327,38 +333,43 @@ create_ridge_plot <- function(gsea_result,
                               title = "GSEA Ridge Plot",
                               colors = NULL,
                               font_size = 12) {
-  
   if (nrow(gsea_result@result) == 0) {
     stop("No GSEA results to plot")
   }
-  
+
   # Create base ridge plot
-  p <- tryCatch({
-    ridgeplot(gsea_result, 
-              showCategory = show_category,
-              orderBy = order_by,
-              decreasing = decreasing) +
-      
-      labs(title = title,
-           x = "Gene Rank",
-           y = "Pathways") +
-      
-      theme_minimal() +
-      theme(
-        plot.title = element_text(size = font_size * 1.2, face = "bold", hjust = 0.5),
-        axis.title = element_text(size = font_size, face = "bold"),
-        axis.text = element_text(size = font_size * 0.9),
-        axis.text.y = element_text(hjust = 0),
-        legend.title = element_text(size = font_size, face = "bold"),
-        legend.text = element_text(size = font_size * 0.9),
-        panel.grid.minor = element_blank(),
-        plot.margin = margin(t = 20, r = 20, b = 20, l = 20)
-      )
-  }, error = function(e) {
-    warning(paste("Ridge plot failed:", e$message))
-    return(NULL)
-  })
-  
+  p <- tryCatch(
+    {
+      ridgeplot(gsea_result,
+        showCategory = show_category,
+        orderBy = order_by,
+        decreasing = decreasing
+      ) +
+
+        labs(
+          title = title,
+          x = "Gene Rank",
+          y = "Pathways"
+        ) +
+
+        theme_minimal() +
+        theme(
+          plot.title = element_text(size = font_size * 1.2, face = "bold", hjust = 0.5),
+          axis.title = element_text(size = font_size, face = "bold"),
+          axis.text = element_text(size = font_size * 0.9),
+          axis.text.y = element_text(hjust = 0),
+          legend.title = element_text(size = font_size, face = "bold"),
+          legend.text = element_text(size = font_size * 0.9),
+          panel.grid.minor = element_blank(),
+          plot.margin = margin(t = 20, r = 20, b = 20, l = 20)
+        )
+    },
+    error = function(e) {
+      warning(paste("Ridge plot failed:", e$message))
+      return(NULL)
+    }
+  )
+
   return(p)
 }
 
@@ -382,7 +393,7 @@ create_ridge_plot <- function(gsea_result,
 #'
 #' @examples
 #' gsea_plots <- create_gsea_plots(gsea_results, "output/gsea_plots/")
-#' 
+#'
 #' @export
 create_gsea_plots <- function(gsea_result,
                               output_dir,
@@ -394,37 +405,36 @@ create_gsea_plots <- function(gsea_result,
                               base_size = 12,
                               show_progress = TRUE,
                               dpi = 300) {
-  
   # Get significant results
   gsea_df <- gsea_result@result
   significant_results <- gsea_df[gsea_df$qvalue < q_threshold, ]
-  
+
   if (nrow(significant_results) == 0) {
     warning("No significant results to plot")
     return(list())
   }
-  
+
   # Remove pathways with NA values that can cause plotting issues
-  significant_results <- significant_results[!is.na(significant_results$enrichmentScore) & 
-                                               !is.na(significant_results$NES) & 
-                                               !is.na(significant_results$qvalue), ]
-  
+  significant_results <- significant_results[!is.na(significant_results$enrichmentScore) &
+    !is.na(significant_results$NES) &
+    !is.na(significant_results$qvalue), ]
+
   if (nrow(significant_results) == 0) {
     warning("No valid results to plot after filtering NA values")
     return(list())
   }
-  
+
   # Limit number of plots
   if (nrow(significant_results) > max_plots) {
     warning(paste("Limiting to", max_plots, "plots (out of", nrow(significant_results), "significant results)"))
     significant_results <- head(significant_results, max_plots)
   }
-  
+
   # Create output directory
   if (!dir.exists(output_dir)) {
     dir.create(output_dir, recursive = TRUE)
   }
-  
+
   # Initialize progress bar
   if (show_progress) {
     pb <- progress_bar$new(
@@ -434,24 +444,24 @@ create_gsea_plots <- function(gsea_result,
       width = 80
     )
   }
-  
+
   # Generate plots
   plots <- list()
   successful_plots <- 0
-  
+
   for (i in 1:nrow(significant_results)) {
     if (show_progress) pb$tick()
-    
+
     pathway <- significant_results[i, ]
     pathway_id <- pathway$ID
     pathway_name <- pathway$Description
-    
+
     # Validate pathway data
     if (is.na(pathway_id) || is.na(pathway_name)) {
       warning(paste("Skipping pathway with missing ID or name:", pathway_id))
       next
     }
-    
+
     # Create plot title with statistics
     plot_title <- paste0(pathway_id, ": ", pathway_name)
     plot_subtitle <- paste0(
@@ -459,102 +469,125 @@ create_gsea_plots <- function(gsea_result,
       ", NES: ", round(pathway$NES, 3),
       ", q-value: ", scientific(pathway$qvalue, digits = 3)
     )
-    
+
     # Try multiple approaches to create GSEA plot
     gsea_plot <- NULL
-    
+
     # Method 1: Try gseaplot2 with basic parameters
     if (is.null(gsea_plot)) {
-      gsea_plot <- tryCatch({
-        gseaplot2(gsea_result, 
-                  geneSetID = pathway_id,
-                  title = plot_title,
-                  pvalue_table = FALSE,
-                  base_size = base_size)
-      }, error = function(e) {
-        if (show_progress) cat(paste("\nMethod 1 failed for", pathway_id, ":", e$message, "\n"))
-        return(NULL)
-      })
+      gsea_plot <- tryCatch(
+        {
+          gseaplot2(gsea_result,
+            geneSetID = pathway_id,
+            title = plot_title,
+            pvalue_table = FALSE,
+            base_size = base_size
+          )
+        },
+        error = function(e) {
+          if (show_progress) cat(paste("\nMethod 1 failed for", pathway_id, ":", e$message, "\n"))
+          return(NULL)
+        }
+      )
     }
-    
+
     # Method 2: Try with single subplot
     if (is.null(gsea_plot)) {
-      gsea_plot <- tryCatch({
-        gseaplot2(gsea_result, 
-                  geneSetID = pathway_id,
-                  title = plot_title,
-                  subplots = 1,
-                  pvalue_table = FALSE,
-                  base_size = base_size)
-      }, error = function(e) {
-        if (show_progress) cat(paste("\nMethod 2 failed for", pathway_id, ":", e$message, "\n"))
-        return(NULL)
-      })
+      gsea_plot <- tryCatch(
+        {
+          gseaplot2(gsea_result,
+            geneSetID = pathway_id,
+            title = plot_title,
+            subplots = 1,
+            pvalue_table = FALSE,
+            base_size = base_size
+          )
+        },
+        error = function(e) {
+          if (show_progress) cat(paste("\nMethod 2 failed for", pathway_id, ":", e$message, "\n"))
+          return(NULL)
+        }
+      )
     }
-    
+
     # Method 3: Try the original gseaplot function
     if (is.null(gsea_plot)) {
-      gsea_plot <- tryCatch({
-        gseaplot(gsea_result, 
-                 geneSetID = pathway_id,
-                 title = plot_title,
-                 by = "runningScore") +
-          theme(plot.title = element_text(size = base_size * 1.1, face = "bold"))
-      }, error = function(e) {
-        if (show_progress) cat(paste("\nMethod 3 failed for", pathway_id, ":", e$message, "\n"))
-        return(NULL)
-      })
+      gsea_plot <- tryCatch(
+        {
+          gseaplot(gsea_result,
+            geneSetID = pathway_id,
+            title = plot_title,
+            by = "runningScore"
+          ) +
+            theme(plot.title = element_text(size = base_size * 1.1, face = "bold"))
+        },
+        error = function(e) {
+          if (show_progress) cat(paste("\nMethod 3 failed for", pathway_id, ":", e$message, "\n"))
+          return(NULL)
+        }
+      )
     }
-    
+
     # Method 4: Create a simple custom plot
     if (is.null(gsea_plot)) {
-      gsea_plot <- tryCatch({
-        # Create a simple text plot as fallback
-        ggplot() +
-          annotate("text", x = 0.5, y = 0.5, 
-                   label = paste("Plot generation failed for:\n", 
-                                 plot_title, "\n\n", plot_subtitle),
-                   size = 4, hjust = 0.5, vjust = 0.5) +
-          theme_void() +
-          theme(plot.margin = margin(20, 20, 20, 20))
-      }, error = function(e) {
-        if (show_progress) cat(paste("\nAll methods failed for", pathway_id, "\n"))
-        return(NULL)
-      })
+      gsea_plot <- tryCatch(
+        {
+          # Create a simple text plot as fallback
+          ggplot() +
+            annotate("text",
+              x = 0.5, y = 0.5,
+              label = paste(
+                "Plot generation failed for:\n",
+                plot_title, "\n\n", plot_subtitle
+              ),
+              size = 4, hjust = 0.5, vjust = 0.5
+            ) +
+            theme_void() +
+            theme(plot.margin = margin(20, 20, 20, 20))
+        },
+        error = function(e) {
+          if (show_progress) cat(paste("\nAll methods failed for", pathway_id, "\n"))
+          return(NULL)
+        }
+      )
     }
-    
+
     if (!is.null(gsea_plot)) {
       successful_plots <- successful_plots + 1
       plots[[pathway_id]] <- gsea_plot
-      
+
       # Add subtitle if the plot was created successfully
       if ("ggplot" %in% class(gsea_plot)) {
         gsea_plot <- gsea_plot + labs(subtitle = plot_subtitle)
       }
-      
+
       # Save plots in requested formats
       safe_filename <- sanitize_filename(paste0(pathway_id, "_", pathway_name))
-      
+
       for (format in plot_formats) {
         filename <- file.path(output_dir, paste0(safe_filename, ".", format))
-        
-        tryCatch({
-          ggsave(filename, gsea_plot, 
-                 width = plot_width, height = plot_height, dpi = dpi)
-        }, error = function(e) {
-          warning(paste("Failed to save", format, "plot for", pathway_id, ":", e$message))
-        })
+
+        tryCatch(
+          {
+            ggsave(filename, gsea_plot,
+              width = plot_width, height = plot_height, dpi = dpi
+            )
+          },
+          error = function(e) {
+            warning(paste("Failed to save", format, "plot for", pathway_id, ":", e$message))
+          }
+        )
       }
     } else {
       warning(paste("All plot generation methods failed for pathway:", pathway_id))
     }
   }
-  
+
   if (show_progress) {
     cat("\nGSEA plots completed!\n")
     cat("Generated", successful_plots, "out of", nrow(significant_results), "plots in", output_dir, "\n")
   }
-  
+
   return(plots)
 }
 
@@ -572,53 +605,54 @@ create_gsea_plots <- function(gsea_result,
 #'
 #' @examples
 #' summary_plot <- create_gsea_summary_plot(gsea_results)
-#' 
+#'
 #' @export
 create_gsea_summary_plot <- function(gsea_result,
                                      top_n = 20,
                                      title = "GSEA Summary",
                                      font_size = 12) {
-  
   gsea_df <- gsea_result@result
-  
+
   if (nrow(gsea_df) == 0) {
     stop("No GSEA results to plot")
   }
-  
+
   # Select top results
   plot_data <- head(gsea_df, top_n)
-  
+
   # Wrap pathway names for better display
   plot_data$Description_wrapped <- str_wrap(plot_data$Description, width = 40)
-  
+
   # Create factor for ordering
   plot_data$Description_wrapped <- factor(
     plot_data$Description_wrapped,
     levels = rev(plot_data$Description_wrapped)
   )
-  
+
   # Create dot plot
   p <- ggplot(plot_data, aes(y = Description_wrapped)) +
-    
-    geom_point(aes(x = NES, 
-                   size = abs(enrichmentScore), 
-                   color = qvalue)) +
-    
+    geom_point(aes(
+      x = NES,
+      size = abs(enrichmentScore),
+      color = qvalue
+    )) +
     geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
-    
-    scale_color_gradient(low = "#E74C3C", high = "#3498DB",
-                         name = "Q-value",
-                         trans = "log10",
-                         labels = scientific_format()) +
-    
-    scale_size_continuous(name = "|ES|",
-                          range = c(3, 8),
-                          breaks = pretty_breaks(n = 4)) +
-    
-    labs(title = title,
-         x = "Normalized Enrichment Score (NES)",
-         y = NULL) +
-    
+    scale_color_gradient(
+      low = "#E74C3C", high = "#3498DB",
+      name = "Q-value",
+      trans = "log10",
+      labels = scientific_format()
+    ) +
+    scale_size_continuous(
+      name = "|ES|",
+      range = c(3, 8),
+      breaks = pretty_breaks(n = 4)
+    ) +
+    labs(
+      title = title,
+      x = "Normalized Enrichment Score (NES)",
+      y = NULL
+    ) +
     theme_minimal() +
     theme(
       plot.title = element_text(size = font_size * 1.2, face = "bold", hjust = 0.5),
@@ -631,7 +665,7 @@ create_gsea_summary_plot <- function(gsea_result,
       panel.grid.major.y = element_blank(),
       plot.margin = margin(t = 20, r = 20, b = 20, l = 20)
     )
-  
+
   return(p)
 }
 
@@ -660,9 +694,10 @@ create_gsea_summary_plot <- function(gsea_result,
 #' @return List with GSEA results, plots, and summary statistics
 #'
 #' @examples
-#' results <- run_gsea_workflow(gene_data, term2gene, term2name, 
-#'                             output_dir = "gsea_results/")
-#' 
+#' results <- run_gsea_workflow(gene_data, term2gene, term2name,
+#'   output_dir = "gsea_results/"
+#' )
+#'
 #' @export
 run_gsea_workflow <- function(gene_data,
                               term2gene,
@@ -677,14 +712,13 @@ run_gsea_workflow <- function(gene_data,
                               create_plots = TRUE,
                               plot_formats = c("pdf", "png"),
                               verbose = TRUE) {
-  
   if (verbose) cat("Starting GSEA workflow...\n")
-  
+
   # Create output directory
   if (!dir.exists(output_dir)) {
     dir.create(output_dir, recursive = TRUE)
   }
-  
+
   # Run GSEA analysis
   gsea_result <- run_gsea_analysis(
     gene_data = gene_data,
@@ -697,42 +731,52 @@ run_gsea_workflow <- function(gene_data,
     gsea_qvalue_cutoff = gsea_qvalue_cutoff,
     verbose = verbose
   )
-  
+
   # Export results
   if (verbose) cat("Exporting GSEA results...\n")
-  write.csv(gsea_result@result, 
-            file.path(output_dir, paste0(file_prefix, "_results.csv")), 
-            row.names = FALSE)
-  
+  write.csv(gsea_result@result,
+    file.path(output_dir, paste0(file_prefix, "_results.csv")),
+    row.names = FALSE
+  )
+
   # Create summary plots
   plots <- list()
-  
+
   if (nrow(gsea_result@result) > 0) {
-    
     # Ridge plot
     if (verbose) cat("Creating ridge plot...\n")
-    tryCatch({
-      ridge_plot <- create_ridge_plot(gsea_result)
-      if (!is.null(ridge_plot)) {
-        plots$ridge_plot <- ridge_plot
-        ggsave(file.path(output_dir, paste0(file_prefix, "_ridge_plot.pdf")),
-               ridge_plot, width = 12, height = 8, dpi = 300)
+    tryCatch(
+      {
+        ridge_plot <- create_ridge_plot(gsea_result)
+        if (!is.null(ridge_plot)) {
+          plots$ridge_plot <- ridge_plot
+          ggsave(file.path(output_dir, paste0(file_prefix, "_ridge_plot.pdf")),
+            ridge_plot,
+            width = 12, height = 8, dpi = 300
+          )
+        }
+      },
+      error = function(e) {
+        warning(paste("Ridge plot failed:", e$message))
       }
-    }, error = function(e) {
-      warning(paste("Ridge plot failed:", e$message))
-    })
-    
+    )
+
     # Summary plot
     if (verbose) cat("Creating summary plot...\n")
-    tryCatch({
-      summary_plot <- create_gsea_summary_plot(gsea_result)
-      plots$summary_plot <- summary_plot
-      ggsave(file.path(output_dir, paste0(file_prefix, "_summary_plot.pdf")),
-             summary_plot, width = 10, height = 8, dpi = 300)
-    }, error = function(e) {
-      warning(paste("Summary plot failed:", e$message))
-    })
-    
+    tryCatch(
+      {
+        summary_plot <- create_gsea_summary_plot(gsea_result)
+        plots$summary_plot <- summary_plot
+        ggsave(file.path(output_dir, paste0(file_prefix, "_summary_plot.pdf")),
+          summary_plot,
+          width = 10, height = 8, dpi = 300
+        )
+      },
+      error = function(e) {
+        warning(paste("Summary plot failed:", e$message))
+      }
+    )
+
     # Individual pathway plots
     if (create_plots) {
       if (verbose) cat("Creating individual pathway plots...\n")
@@ -747,7 +791,7 @@ run_gsea_workflow <- function(gene_data,
       plots$pathway_plots <- pathway_plots
     }
   }
-  
+
   # Create summary statistics
   summary_stats <- list(
     total_pathways = nrow(gsea_result@result),
@@ -763,11 +807,11 @@ run_gsea_workflow <- function(gene_data,
 
   # Set significant_pathways to 0 if missing (i.e., no significant pathways found)
   summary_stats$significant_pathways <- ifelse(
-    is.na(summary_stats$significant_pathways), 
-    0, 
+    is.na(summary_stats$significant_pathways),
+    0,
     summary_stats$significant_pathways
   )
-  
+
   # Export summary
   writeLines(
     c(
@@ -784,23 +828,26 @@ run_gsea_workflow <- function(gene_data,
     ),
     file.path(output_dir, paste0(file_prefix, "_summary.txt"))
   )
-  
+
   # Add top pathways to summary
   if (summary_stats$significant_pathways > 0) {
-    top_pathways <- head(gsea_result@result[gsea_result@result$qvalue < gsea_qvalue_cutoff, 
-                                            c("Description", "NES", "qvalue")], 10)
-    write.table(top_pathways, 
-                file.path(output_dir, paste0(file_prefix, "_summary.txt")),
-                append = TRUE, sep = "\t", row.names = FALSE)
+    top_pathways <- head(gsea_result@result[
+      gsea_result@result$qvalue < gsea_qvalue_cutoff,
+      c("Description", "NES", "qvalue")
+    ], 10)
+    write.table(top_pathways,
+      file.path(output_dir, paste0(file_prefix, "_summary.txt")),
+      append = TRUE, sep = "\t", row.names = FALSE
+    )
   }
-  
+
   if (verbose) {
     cat("GSEA workflow completed!\n")
     cat("Results saved to:", output_dir, "\n")
     cat("Total pathways:", summary_stats$total_pathways, "\n")
     cat("Significant pathways:", summary_stats$significant_pathways, "\n")
   }
-  
+
   return(list(
     gsea_result = gsea_result,
     plots = plots,
@@ -824,36 +871,35 @@ run_gsea_workflow <- function(gene_data,
 #'
 #' @examples
 #' diagnostics <- diagnose_gsea_results(gsea_results)
-#' 
+#'
 #' @export
 diagnose_gsea_results <- function(gsea_result, verbose = TRUE) {
-  
   if (verbose) cat("=== GSEA RESULTS DIAGNOSTICS ===\n")
-  
+
   # Basic information
   total_pathways <- nrow(gsea_result@result)
   gene_list_length <- length(gsea_result@geneList)
-  
+
   if (verbose) {
     cat("Total pathways tested:", total_pathways, "\n")
     cat("Gene list length:", gene_list_length, "\n")
   }
-  
+
   # Check for results
   if (total_pathways == 0) {
     if (verbose) cat("WARNING: No pathways found in results\n")
     return(list(status = "no_results", pathways = 0, genes = gene_list_length))
   }
-  
+
   # Analyze results
   results_df <- gsea_result@result
-  
+
   # Check for NA values
   na_enrichment <- sum(is.na(results_df$enrichmentScore))
   na_nes <- sum(is.na(results_df$NES))
   na_pvalue <- sum(is.na(results_df$pvalue))
   na_qvalue <- sum(is.na(results_df$qvalue))
-  
+
   if (verbose) {
     cat("NA values in results:\n")
     cat("  - Enrichment Score:", na_enrichment, "\n")
@@ -861,33 +907,33 @@ diagnose_gsea_results <- function(gsea_result, verbose = TRUE) {
     cat("  - P-value:", na_pvalue, "\n")
     cat("  - Q-value:", na_qvalue, "\n")
   }
-  
+
   # Check significance
   sig_05 <- sum(results_df$qvalue < 0.05, na.rm = TRUE)
   sig_01 <- sum(results_df$qvalue < 0.01, na.rm = TRUE)
-  
+
   if (verbose) {
     cat("Significant pathways:\n")
     cat("  - q < 0.05:", sig_05, "\n")
     cat("  - q < 0.01:", sig_01, "\n")
   }
-  
+
   # Check gene list properties
   gene_list <- gsea_result@geneList
   gene_range <- range(gene_list, na.rm = TRUE)
-  
+
   if (verbose) {
     cat("Gene list statistics:\n")
     cat("  - Range:", round(gene_range, 3), "\n")
     cat("  - Mean:", round(mean(gene_list, na.rm = TRUE), 3), "\n")
     cat("  - Median:", round(median(gene_list, na.rm = TRUE), 3), "\n")
   }
-  
+
   # Check for problematic pathways
-  problematic_pathways <- results_df[is.na(results_df$enrichmentScore) | 
-                                       is.na(results_df$NES) | 
-                                       is.na(results_df$pvalue), ]
-  
+  problematic_pathways <- results_df[is.na(results_df$enrichmentScore) |
+    is.na(results_df$NES) |
+    is.na(results_df$pvalue), ]
+
   if (nrow(problematic_pathways) > 0 && verbose) {
     cat("Problematic pathways (with NA values):\n")
     for (i in 1:min(5, nrow(problematic_pathways))) {
@@ -897,17 +943,17 @@ diagnose_gsea_results <- function(gsea_result, verbose = TRUE) {
       cat("  ... and", nrow(problematic_pathways) - 5, "more\n")
     }
   }
-  
+
   # Check for plotting issues
-  plottable_pathways <- results_df[!is.na(results_df$enrichmentScore) & 
-                                     !is.na(results_df$NES) & 
-                                     !is.na(results_df$qvalue) &
-                                     results_df$qvalue < 0.05, ]
-  
+  plottable_pathways <- results_df[!is.na(results_df$enrichmentScore) &
+    !is.na(results_df$NES) &
+    !is.na(results_df$qvalue) &
+    results_df$qvalue < 0.05, ]
+
   if (verbose) {
     cat("Plottable significant pathways:", nrow(plottable_pathways), "\n")
   }
-  
+
   # Summary
   status <- "ok"
   if (total_pathways == 0) {
@@ -917,12 +963,12 @@ diagnose_gsea_results <- function(gsea_result, verbose = TRUE) {
   } else if (nrow(plottable_pathways) == 0) {
     status <- "no_plottable"
   }
-  
+
   if (verbose) {
     cat("Status:", status, "\n")
     cat("================================\n")
   }
-  
+
   return(list(
     status = status,
     total_pathways = total_pathways,
@@ -953,14 +999,13 @@ diagnose_gsea_results <- function(gsea_result, verbose = TRUE) {
 #'
 #' @export
 create_simple_gsea_plot <- function(gsea_result, pathway_id, title = NULL) {
-  
   # Get pathway information
   pathway_info <- gsea_result@result[gsea_result@result$ID == pathway_id, ]
-  
+
   if (nrow(pathway_info) == 0) {
     stop(paste("Pathway", pathway_id, "not found in results"))
   }
-  
+
   # Create a simple informational plot
   plot_text <- paste0(
     "Pathway: ", pathway_info$Description, "\n",
@@ -970,18 +1015,20 @@ create_simple_gsea_plot <- function(gsea_result, pathway_id, title = NULL) {
     "Q-value: ", scientific(pathway_info$qvalue, digits = 3), "\n",
     "Gene Count: ", pathway_info$setSize
   )
-  
+
   p <- ggplot() +
-    annotate("text", x = 0.5, y = 0.5, 
-             label = plot_text,
-             size = 4, hjust = 0.5, vjust = 0.5) +
+    annotate("text",
+      x = 0.5, y = 0.5,
+      label = plot_text,
+      size = 4, hjust = 0.5, vjust = 0.5
+    ) +
     theme_void() +
     labs(title = title %||% pathway_id) +
     theme(
       plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
       plot.margin = margin(20, 20, 20, 20)
     )
-  
+
   return(p)
 }
 
@@ -1000,79 +1047,89 @@ create_simple_gsea_plot <- function(gsea_result, pathway_id, title = NULL) {
 #'
 #' @examples
 #' plot <- create_single_gsea_plot(gsea_results, "mmu04146")
-#' 
+#'
 #' @export
-create_single_gsea_plot <- function(gsea_result, 
-                                    pathway_id, 
+create_single_gsea_plot <- function(gsea_result,
+                                    pathway_id,
                                     title = NULL,
                                     methods = c("gseaplot2", "gseaplot", "simple"),
                                     verbose = TRUE) {
-  
   # Get pathway information
   pathway_info <- gsea_result@result[gsea_result@result$ID == pathway_id, ]
-  
+
   if (nrow(pathway_info) == 0) {
     stop(paste("Pathway", pathway_id, "not found in results"))
   }
-  
+
   if (is.null(title)) {
     title <- paste0(pathway_id, ": ", pathway_info$Description)
   }
-  
+
   # Try each method
   for (method in methods) {
     if (verbose) cat("Trying method:", method, "\n")
-    
+
     if (method == "gseaplot2") {
-      plot <- tryCatch({
-        gseaplot2(gsea_result, 
-                  geneSetID = pathway_id,
-                  title = title,
-                  pvalue_table = FALSE,
-                  base_size = 12)
-      }, error = function(e) {
-        if (verbose) cat("gseaplot2 failed:", e$message, "\n")
-        return(NULL)
-      })
-      
+      plot <- tryCatch(
+        {
+          gseaplot2(gsea_result,
+            geneSetID = pathway_id,
+            title = title,
+            pvalue_table = FALSE,
+            base_size = 12
+          )
+        },
+        error = function(e) {
+          if (verbose) cat("gseaplot2 failed:", e$message, "\n")
+          return(NULL)
+        }
+      )
+
       if (!is.null(plot)) {
         if (verbose) cat("Success with gseaplot2!\n")
         return(plot)
       }
     }
-    
+
     if (method == "gseaplot") {
-      plot <- tryCatch({
-        gseaplot(gsea_result, 
-                 geneSetID = pathway_id,
-                 title = title,
-                 by = "runningScore")
-      }, error = function(e) {
-        if (verbose) cat("gseaplot failed:", e$message, "\n")
-        return(NULL)
-      })
-      
+      plot <- tryCatch(
+        {
+          gseaplot(gsea_result,
+            geneSetID = pathway_id,
+            title = title,
+            by = "runningScore"
+          )
+        },
+        error = function(e) {
+          if (verbose) cat("gseaplot failed:", e$message, "\n")
+          return(NULL)
+        }
+      )
+
       if (!is.null(plot)) {
         if (verbose) cat("Success with gseaplot!\n")
         return(plot)
       }
     }
-    
+
     if (method == "simple") {
-      plot <- tryCatch({
-        create_simple_gsea_plot(gsea_result, pathway_id, title)
-      }, error = function(e) {
-        if (verbose) cat("simple plot failed:", e$message, "\n")
-        return(NULL)
-      })
-      
+      plot <- tryCatch(
+        {
+          create_simple_gsea_plot(gsea_result, pathway_id, title)
+        },
+        error = function(e) {
+          if (verbose) cat("simple plot failed:", e$message, "\n")
+          return(NULL)
+        }
+      )
+
       if (!is.null(plot)) {
         if (verbose) cat("Success with simple plot!\n")
         return(plot)
       }
     }
   }
-  
+
   if (verbose) cat("All methods failed for pathway:", pathway_id, "\n")
   return(NULL)
 }
@@ -1115,19 +1172,23 @@ runGSEA <- function(gene.dat, term2gene, term2name, p = "p", p.threshold = 0.05)
 #'
 #' @export
 gseaPlot <- function(gsea, output.dir, gsea.q.threshold = 0.05) {
-  
   # Create ridge plot
-  tryCatch({
-    ridge_plot <- create_ridge_plot(gsea)
-    if (!is.null(ridge_plot)) {
-      ggsave(file.path(output.dir, "ridge_plot.pdf"), 
-             ridge_plot, width = 8, height = 8)
-      cat("Ridge plot saved successfully\n")
+  tryCatch(
+    {
+      ridge_plot <- create_ridge_plot(gsea)
+      if (!is.null(ridge_plot)) {
+        ggsave(file.path(output.dir, "ridge_plot.pdf"),
+          ridge_plot,
+          width = 8, height = 8
+        )
+        cat("Ridge plot saved successfully\n")
+      }
+    },
+    error = function(e) {
+      cat("Ridge plot error:", e$message, "\n")
     }
-  }, error = function(e) {
-    cat("Ridge plot error:", e$message, "\n")
-  })
-  
+  )
+
   # Create individual plots
   pathway_plots_dir <- file.path(output.dir, "gseaplot")
   plots <- create_gsea_plots(
@@ -1137,7 +1198,7 @@ gseaPlot <- function(gsea, output.dir, gsea.q.threshold = 0.05) {
     plot_formats = c("pdf", "png"),
     show_progress = TRUE
   )
-  
+
   cat("Individual pathway plots completed. Generated", length(plots), "plots.\n")
   return(plots)
 }
@@ -1161,7 +1222,7 @@ gseaPlot <- function(gsea, output.dir, gsea.q.threshold = 0.05) {
 #    print(na_pathways$ID)
 #
 # 4. Try different plot methods:
-#    plot <- create_single_gsea_plot(gsea_results, "mmu04146", 
+#    plot <- create_single_gsea_plot(gsea_results, "mmu04146",
 #                                   methods = c("gseaplot", "simple"))
 #
 # 5. Use the legacy function with improved error handling:

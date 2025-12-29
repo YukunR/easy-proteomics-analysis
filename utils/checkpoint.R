@@ -32,7 +32,12 @@ load_checkpoint <- function(workspace) {
 
     # Handle potential interrupted state from previous session
     if (!is.null(checkpoint$current_step)) {
-      log_message(workspace, paste("Detected interrupted step from previous session:", checkpoint$current_step), "WARN")
+      log_message(
+        workspace,
+        paste(
+          "Detected interrupted step from previous session:", checkpoint$current_step
+        ), "WARN"
+      )
       log_message(workspace, "This step will be restarted", "INFO")
 
       # Remove interrupted step from completed steps to ensure it runs again
@@ -111,7 +116,10 @@ cleanup_step_files <- function(workspace, step_name, file_patterns = NULL) {
 
   if (!is.null(file_patterns)) {
     for (pattern in file_patterns) {
-      files_to_remove <- list.files(workspace$base_dir, pattern = pattern, recursive = TRUE, full.names = TRUE)
+      files_to_remove <- list.files(
+        workspace$base_dir,
+        pattern = pattern, recursive = TRUE, full.names = TRUE
+      )
       for (file in files_to_remove) {
         if (file.exists(file)) {
           file.remove(file)
@@ -152,7 +160,10 @@ execute_step <- function(workspace, step_name, step_function,
 
   # Check for interrupted step and reset if necessary
   if (!is.null(checkpoint$current_step) && checkpoint$current_step == step_name) {
-    log_message(workspace, paste("Step", step_name, "was interrupted previously, resetting"), "WARN")
+    log_message(
+      workspace,
+      paste("Step", step_name, "was interrupted previously, resetting"), "WARN"
+    )
     checkpoint$current_step <- NULL
     checkpoint$completed_steps <- setdiff(checkpoint$completed_steps, step_name)
     save_checkpoint(workspace, checkpoint)
@@ -174,7 +185,10 @@ execute_step <- function(workspace, step_name, step_function,
 
     if (!is.null(stored_hash) && current_hash != stored_hash) {
       config_changed <- TRUE
-      log_message(workspace, paste("Configuration changed for step", step_name, "- will re-execute"), "INFO")
+      log_message(
+        workspace,
+        paste("Configuration changed for step", step_name, "- will re-execute"), "INFO"
+      )
     }
   }
 
@@ -187,7 +201,9 @@ execute_step <- function(workspace, step_name, step_function,
         full_path <- file.path(workspace$base_dir, file)
         expected_hash <- checkpoint$file_hashes[[file]]
         if (!verify_file_integrity(full_path, expected_hash)) {
-          log_message(workspace, paste("File", file, "corrupted or missing, need to regenerate"), "WARN")
+          log_message(
+            workspace, paste("File", file, "corrupted or missing, need to regenerate"), "WARN"
+          )
           all_files_ok <- FALSE
           break
         }
@@ -198,7 +214,9 @@ execute_step <- function(workspace, step_name, step_function,
       log_message(workspace, paste("Step", step_name, "already completed, skipping"))
       return(invisible(TRUE))
     } else {
-      log_message(workspace, paste("Step", step_name, "output files have issues, re-executing"), "WARN")
+      log_message(
+        workspace, paste("Step", step_name, "output files have issues, re-executing"), "WARN"
+      )
       # Remove from completed list
       checkpoint$completed_steps <- setdiff(checkpoint$completed_steps, step_name)
     }
@@ -232,7 +250,9 @@ execute_step <- function(workspace, step_name, step_function,
             checkpoint$file_hashes[[file]] <- calculate_file_hash(full_path)
             log_message(workspace, paste("Generated file:", file))
           } else {
-            log_message(workspace, paste("Warning: Expected output file not generated:", file), "WARN")
+            log_message(
+              workspace, paste("Warning: Expected output file not generated:", file), "WARN"
+            )
           }
         }
       }
@@ -290,7 +310,11 @@ check_project_status <- function(project_name = "proteomics_project", base_dir =
   cat("=== Project Status ===\n")
   cat("Project:", project_name, "\n")
   cat("Base directory:", base_dir, "\n")
-  cat("Completed steps:", ifelse(length(checkpoint$completed_steps) == 0, "None", paste(checkpoint$completed_steps, collapse = ", ")), "\n")
+  cat("Completed steps:", ifelse(
+    length(checkpoint$completed_steps) == 0,
+    "None",
+    paste(checkpoint$completed_steps, collapse = ", ")
+  ), "\n")
   cat("Current step:", ifelse(is.null(checkpoint$current_step), "None", checkpoint$current_step), "\n")
   cat("Last update:", checkpoint$last_update, "\n")
 
@@ -452,7 +476,10 @@ invalidate_dependent_steps <- function(workspace, step_name, dependency_map) {
   }
 
   if (length(steps_to_invalidate) > 0) {
-    log_message(workspace, paste("Invalidating dependent steps:", paste(steps_to_invalidate, collapse = ", ")), "INFO")
+    log_message(
+      workspace,
+      paste("Invalidating dependent steps:", paste(steps_to_invalidate, collapse = ", ")), "INFO"
+    )
     checkpoint$completed_steps <- setdiff(checkpoint$completed_steps, steps_to_invalidate)
     save_checkpoint(workspace, checkpoint)
   }
