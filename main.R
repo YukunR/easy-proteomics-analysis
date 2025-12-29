@@ -18,7 +18,7 @@ sample_info_file <- "./data/sample_info.txt"
 
 na_threshold <- 0.6  # Proteins with an NA ratio greater than this value will be discarded
 normalization_method <- "global"  # should be one of "global" and "within_group"
-imputation_method <- "knn"  # should be one of "knn" and "perseus"
+imputation_method <- "auto"  # should be one of "auto", "knn" or "perseus"
 
 # If you have preferred colors uncomment and run the line below.
 # Otherwise, just leave the line below commented out

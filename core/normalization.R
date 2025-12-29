@@ -754,106 +754,135 @@ impute_perseus_style <- function(expression_matrix,
 #' 
 #' @param log2_data log2-transformed data matrix
 #' @param sample_info Sample information containing Sample and Group columns
-#' @param filter_threshold Filter threshold: minimum proportion of samples with values in each group, default 0.5
-#' @param impute_method Imputation method: "perseus" or "knn", default "perseus"
-#' @param sample_col Sample name column, default "Sample"  
+#' @param filter_threshold Filter threshold (NA threshold): maximum proportion of missing values allowed in each group, default 0.5
+#' @param impute_method Imputation method: "perseus", "knn", or "auto", default "perseus"
+#'   \itemize{
+#'     \item "perseus" - Perseus-style imputation for all proteins (with filtering)
+#'     \item "knn" - KNN imputation for all proteins (with filtering)
+#'     \item "auto" - Adaptive (NO filtering): uses KNN for proteins with NA ratio <= filter_threshold,
+#'                    uses Perseus for proteins with NA ratio > filter_threshold
+#'   }
+#' @param sample_col Sample name column, default "Sample"
 #' @param group_col Group column, default "Group"
 #' @param output_dir Output directory
 #' @param knn_k K value for KNN imputation, default 10
-#' 
+#'
 #' @return Filtered and imputed data matrix
-#' 
+#'
 #' @export
 filter_and_impute <- function(log2_data,
                               sample_info,
                               filter_threshold = 0.5,
                               impute_method = "perseus",
                               sample_col = "Sample",
-                              group_col = "Group", 
+                              group_col = "Group",
                               output_dir = "./",
                               knn_k = 10) {
-  
   # Check input parameters
   if (!is.data.frame(sample_info)) {
     stop("sample_info must be a data frame")
   }
-  
+
   required_cols <- c(sample_col, group_col)
   missing_cols <- setdiff(required_cols, colnames(sample_info))
   if (length(missing_cols) > 0) {
     stop(paste("Missing columns in sample_info:", paste(missing_cols, collapse = ", ")))
   }
-  
+
+  # Validate impute_method
+  if (!impute_method %in% c("perseus", "knn", "auto")) {
+    stop("Invalid impute_method. Use 'perseus', 'knn', or 'auto'.")
+  }
+
   # Create output directory
   if (!dir.exists(output_dir)) {
     dir.create(output_dir, recursive = TRUE)
   }
-  
+
   # Prepare data for filtering
   # Replace -Inf with NA (result of log(0))
   log2_data[log2_data == -Inf] <- NA
-  
+
   # Add Accession column for downstream processing
   log2_data_with_id <- log2_data
   log2_data_with_id$Accession <- rownames(log2_data)
-  
+
   # Convert data to long format
-  log2_data_long <- melt(log2_data_with_id, 
-                         id.vars = "Accession",
-                         variable.name = "Sample", 
-                         value.name = "Intensity")
-  
+  log2_data_long <- melt(log2_data_with_id,
+    id.vars = "Accession",
+    variable.name = "Sample",
+    value.name = "Intensity"
+  )
+
   # Calculate total sample count per group
-  sample_info_with_count <- sample_info %>% 
+  sample_info_with_count <- sample_info %>%
     add_count(!!sym(group_col), name = "total_count")
-  
+
   # Merge data
-  data_for_filtering <- merge(log2_data_long, 
-                              sample_info_with_count, 
-                              by.x = "Sample", 
-                              by.y = sample_col, 
-                              all.x = TRUE)
-  
-  # Calculate filtering statistics
-  filtered_data <- data_for_filtering %>% 
-    group_by(Accession, !!sym(group_col)) %>% 
+  data_for_filtering <- merge(log2_data_long,
+    sample_info_with_count,
+    by.x = "Sample",
+    by.y = sample_col,
+    all.x = TRUE
+  )
+
+  # Calculate filtering statistics per protein per group
+  protein_group_stats <- data_for_filtering %>%
+    group_by(Accession, !!sym(group_col)) %>%
     summarise(
-      non_na_count = sum(!is.na(Intensity)),
+      na_count = sum(is.na(Intensity)),
       total_count = first(total_count),
-      non_na_percentage = non_na_count / total_count,
+      na_percentage = na_count / total_count,
       .groups = "drop"
-    ) %>% 
+    )
+
+  # Calculate maximum NA percentage across all groups for each protein
+  protein_stats <- protein_group_stats %>%
     group_by(Accession) %>%
     summarise(
-      min_percentage = min(non_na_percentage),
+      max_na_percentage = max(na_percentage),
       .groups = "drop"
-    ) %>%
-    filter(min_percentage >= filter_threshold)
-  
-  cat("Filtering completed:\n")
-  cat("Original proteins:", nrow(log2_data), "\n")
-  cat("Proteins after filtering:", nrow(filtered_data), "\n")
-  cat("Filter threshold:", filter_threshold, "\n")
-  
-  # Apply filtering
-  filtered_log2_data <- log2_data[filtered_data$Accession, , drop = FALSE]
-  
+    )
+
+  # Filtering step: only apply for perseus and knn methods, NOT for auto
+  if (impute_method %in% c("perseus", "knn")) {
+    # Filter proteins: keep those with NA percentage <= threshold in ALL groups
+    filtered_proteins <- protein_stats %>%
+      filter(max_na_percentage <= filter_threshold)
+
+    cat("Filtering completed:\n")
+    cat("Original proteins:", nrow(log2_data), "\n")
+    cat("Proteins after filtering:", nrow(filtered_proteins), "\n")
+    cat("NA threshold:", filter_threshold, "\n")
+
+    # Apply filtering
+    filtered_log2_data <- log2_data[filtered_proteins$Accession, , drop = FALSE]
+  } else {
+    # Auto mode: NO filtering, keep all proteins
+    cat("Auto mode: No filtering applied (all proteins retained for adaptive imputation)\n")
+    cat("Total proteins:", nrow(log2_data), "\n")
+    cat("NA threshold for method selection:", filter_threshold, "\n")
+
+    filtered_log2_data <- log2_data
+  }
+
   # Group data by groups for imputation
   groups <- unique(sample_info[[group_col]])
   grouped_data <- list()
-  
+
   for (group in groups) {
     samples_in_group <- sample_info[[sample_col]][sample_info[[group_col]] == group]
     valid_samples <- intersect(samples_in_group, colnames(filtered_log2_data))
-    
+
     if (length(valid_samples) > 0) {
       grouped_data[[group]] <- filtered_log2_data[, valid_samples, drop = FALSE]
     }
   }
-  
-  # Perform imputation
+
+  # Perform imputation based on method
   if (impute_method == "perseus") {
     imputed_groups <- lapply(grouped_data, impute_perseus_style)
+    cat("Imputation completed using method: perseus\n")
   } else if (impute_method == "knn") {
     imputed_groups <- lapply(grouped_data, function(x) {
       res <- multiUS::KNNimp(x, k = knn_k)
@@ -861,20 +890,110 @@ filter_and_impute <- function(log2_data,
       colnames(res) <- colnames(x)
       res
     })
-  } else {
-    stop("Invalid impute_method. Use 'perseus' or 'knn'.")
+    cat("Imputation completed using method: knn\n")
+  } else if (impute_method == "auto") {
+    # Auto mode: use different methods based on NA ratio per protein per group
+    # NA ratio > threshold -> Perseus (more missing, use random imputation)
+    # NA ratio <= threshold -> KNN (less missing, use neighbor-based imputation)
+    cat("Using auto imputation mode...\n")
+    cat(sprintf("  NA ratio > %.2f -> Perseus\n", filter_threshold))
+    cat(sprintf("  NA ratio <= %.2f -> KNN\n", filter_threshold))
+
+    imputed_groups <- list()
+
+    for (group in names(grouped_data)) {
+      group_data <- grouped_data[[group]]
+      n_samples <- ncol(group_data)
+
+      # Calculate NA ratio for each protein in this group
+      na_ratios <- rowSums(is.na(group_data)) / n_samples
+
+      # Classify proteins based on NA threshold
+      knn_proteins <- names(na_ratios[na_ratios <= filter_threshold])
+      perseus_proteins <- names(na_ratios[na_ratios > filter_threshold])
+
+      cat(sprintf(
+        "  Group '%s': %d proteins for KNN (NA <= %.2f), %d proteins for Perseus (NA > %.2f)\n",
+        group, length(knn_proteins), filter_threshold,
+        length(perseus_proteins), filter_threshold
+      ))
+
+      # Initialize result matrix
+      imputed_group_data <- group_data
+
+      # Apply KNN imputation to proteins with less missing data
+      if (length(knn_proteins) > 0) {
+        knn_data <- group_data[knn_proteins, , drop = FALSE]
+        # Only apply KNN if there are missing values
+        if (any(is.na(knn_data))) {
+          knn_imputed <- multiUS::KNNimp(knn_data, k = min(knn_k, n_samples - 1))
+          knn_imputed <- as.data.frame(knn_imputed)
+          colnames(knn_imputed) <- colnames(knn_data)
+          imputed_group_data[knn_proteins, ] <- knn_imputed
+        }
+      }
+
+      # Apply Perseus imputation to proteins with more missing data
+      if (length(perseus_proteins) > 0) {
+        perseus_data <- group_data[perseus_proteins, , drop = FALSE]
+        # Only apply Perseus if there are missing values
+        if (any(is.na(perseus_data))) {
+          perseus_imputed <- impute_perseus_style(as.matrix(perseus_data))
+          imputed_group_data[perseus_proteins, ] <- perseus_imputed
+        }
+      }
+
+      imputed_groups[[group]] <- imputed_group_data
+    }
+
+    cat("Imputation completed using method: auto\n")
   }
-  
+
   # Combine imputed data
   names(imputed_groups) <- NULL
   imputed_data <- do.call(cbind, imputed_groups)
   cat("Imputed result:", if (is.null(imputed_data)) "NULL" else paste(dim(imputed_data), collapse = "x"), "\n")
+
   # Ensure column order matches original data
   original_order <- intersect(colnames(log2_data), colnames(imputed_data))
   imputed_data <- imputed_data[, original_order, drop = FALSE]
-  
-  cat("Imputation completed using method:", impute_method, "\n")
-  
+
+  # Save imputation method report for auto mode
+  if (impute_method == "auto") {
+    # Create detailed report
+    auto_report <- data.frame(
+      Accession = character(),
+      Group = character(),
+      NA_Ratio = numeric(),
+      Method_Used = character(),
+      stringsAsFactors = FALSE
+    )
+
+    for (group in names(grouped_data)) {
+      group_data <- grouped_data[[group]]
+      n_samples <- ncol(group_data)
+      na_ratios <- rowSums(is.na(group_data)) / n_samples
+
+      group_report <- data.frame(
+        Accession = names(na_ratios),
+        Group = group,
+        NA_Ratio = round(na_ratios, 4),
+        Method_Used = ifelse(na_ratios > filter_threshold, "Perseus", "KNN"),
+        stringsAsFactors = FALSE
+      )
+      auto_report <- rbind(auto_report, group_report)
+    }
+
+    write.csv(auto_report,
+      file.path(output_dir, "auto_imputation_report.csv"),
+      row.names = FALSE
+    )
+    cat(
+      "Auto imputation report saved to:",
+      file.path(output_dir, "auto_imputation_report.csv"), "\n"
+    )
+  }
+
   return(imputed_data)
 }
 
