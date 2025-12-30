@@ -24,13 +24,28 @@ imputation_method <- "auto"  # should be one of "auto", "knn" or "perseus"
 # Otherwise, just leave the line below commented out
 # custom_colors <- c("#FF5733", "#33C3FF", "#75FF33")
 
+# ==== Threshold Settings ====
+# FC threshold mode:
+#   - "auto": automatically calculate using coverage analysis
+#     (global_fc_threshold and comparison fc_threshold will be IGNORED with warning)
+#   - "global": use global_fc_threshold for all comparisons
+#   - "per_comparison": use fc_threshold in each comparison, or ask interactively if not specified
+fc_threshold_mode <- "auto"
+global_fc_threshold <- 2  # Used when fc_threshold_mode = "global"
+
+# P-value threshold mode (default: 0.05):
+#   - "global": use global_p_threshold for all comparisons
+#   - "per_comparison": use p_threshold in each comparison, or ask interactively if not specified
+p_threshold_mode <- "global"
+global_p_threshold <- 0.05  # Used when p_threshold_mode = "global"
+
 # ==== Differential expression analysis ====
 # Ensure that the group names below match the group names used in sample_info
 comparisons <- list(
   list(control = "HC", treatment = "NC", name = "HC_vs_NC"),
-  list(control = "HD", treatment = "HC", name = "HD_vs_HC"),
-  list(control = c("HC", "HD"), treatment = "NC", name = "NC_vs_Rest"), 
-  list(control = "HD", treatment = c("HC", "NC"), name = "Rest_vs_HD"), 
+  list(control = "HD", treatment = "HC", name = "HD_vs_HC", fc_threshold = 2),
+  list(control = c("HC", "HD"), treatment = "NC", name = "NC_vs_Rest"),
+  list(control = "HD", treatment = c("HC", "NC"), name = "Rest_vs_HD"),
   list(control = "HC", treatment = c("HD", "NC"), name = "Rest_vs_HC")
   # This causes an error because NC appears in both the control and treatment groups.
   # list(control = c"HC", treatment = c("HD", "NC"), name = "Rest_vs_HC")

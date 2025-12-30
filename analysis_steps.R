@@ -26,7 +26,15 @@ get_config <- function() {
   config$go_background_file <- if (exists("go_background_file", envir = .GlobalEnv)) get("go_background_file", envir = .GlobalEnv) else "./data/all_uniprot_go_background.csv"
   config$kegg_background_file <- if (exists("kegg_background_file", envir = .GlobalEnv)) get("kegg_background_file", envir = .GlobalEnv) else "./data/pathfromKegg_mmu.txt"
   config$custom_colors <- if (exists("custom_colors", envir = .GlobalEnv)) get("custom_colors", envir = .GlobalEnv) else NULL
-
+  # FC threshold settings
+  config$fc_threshold_mode <- if (exists("fc_threshold_mode", envir = .GlobalEnv)) get("fc_threshold_mode", envir = .GlobalEnv) else "auto"
+  config$global_fc_threshold <- if (exists("global_fc_threshold", envir = .GlobalEnv)) get("global_fc_threshold", envir = .GlobalEnv) else 1.5
+  # P-value threshold settings
+  config$p_threshold_mode <- if (exists("p_threshold_mode", envir = .GlobalEnv)) get("p_threshold_mode", envir = .GlobalEnv) else "global"
+  config$global_p_threshold <- if (exists("global_p_threshold", envir = .GlobalEnv)) get("global_p_threshold", envir = .GlobalEnv) else 0.05
+  
+  # Normalize comparisons
+  names(config$comparisons) <- sapply(config$comparisons, `[[`, "name")
   return(config)
 }
 
@@ -386,13 +394,53 @@ step_differential_analysis_single <- function(workspace, group_name, config = NU
   fc_coverage <- analyze_coverage(ttest_results, fc_column = "log2_fold_change")
   export_coverage_results(fc_coverage, output_dir = group_output_dir)
 
+  # ==== Find comparison config for this group ====
+  comparison_config <- NULL
+  for (comp in config$comparisons) {
+    if (comp$name == group_name) {
+      comparison_config <- comp
+      break
+    }
+  }
+
+  # ==== Determine thresholds using threshold_utils ====
+  source("core/volcano_threshold_determination.R", local = TRUE)
+  thresholds <- determine_thresholds(
+    ttest_results = ttest_results,
+    group_name = group_name,
+    config = config,
+    comparison_config = comparison_config,
+    fc_coverage_result = fc_coverage,
+    fc_column = "log2_fold_change",
+    output_dir = group_output_dir
+  )
+
+  fc_threshold <- thresholds$fc_threshold
+  p_threshold <- thresholds$p_threshold
+
+  # Log final thresholds
+  log_message(
+    workspace,
+    paste(
+      "FC threshold for", group_name, ":", fc_threshold,
+      "(source:", thresholds$fc_source, ")"
+    )
+  )
+  log_message(
+    workspace,
+    paste(
+      "P-value threshold for", group_name, ":", p_threshold,
+      "(source:", thresholds$p_source, ")"
+    )
+  )
+
   # ==== Volcano plot ====
   source("core/volcano_plot.R", local = TRUE)
   volcano_results <- create_volcano_plot(ttest_results,
     fc_column = "log2_fold_change",
     p_column = "p_value",
-    fc_threshold = fc_coverage$threshold,
-    p_threshold = 0.05,
+    fc_threshold = fc_threshold,
+    p_threshold = p_threshold,
     gene_annotations = protein_annotation,
     annotation_counts = c(up = 10, down = 10),
     sort_method = "fc"
@@ -495,6 +543,34 @@ step_differential_analysis_single <- function(workspace, group_name, config = NU
 
   log_message(workspace, paste("Comparison group", group_name, "analysis completed"))
   return(paste("Comparison group", group_name, "completed"))
+}
+
+#' Build threshold config for tracking
+#'
+#' @param config Configuration from get_config()
+#' @param group_name Name of comparison group
+#' @return List of threshold-related config to track
+build_threshold_config_for_tracking <- function(config, group_name = NULL) {
+  # Core threshold settings
+  threshold_config <- list(
+    fc_threshold_mode = config$fc_threshold_mode,
+    global_fc_threshold = config$global_fc_threshold,
+    p_threshold_mode = config$p_threshold_mode,
+    global_p_threshold = config$global_p_threshold
+  )
+
+  # If group_name provided, also include comparison-specific thresholds
+  if (!is.null(group_name) && length(config$comparisons) > 0) {
+    for (comp in config$comparisons) {
+      if (comp$name == group_name) {
+        threshold_config$comparison_fc_threshold <- comp$fc_threshold
+        threshold_config$comparison_p_threshold <- comp$p_threshold
+        break
+      }
+    }
+  }
+
+  return(threshold_config)
 }
 
 # ==========================================
@@ -603,11 +679,13 @@ run_proteomics_analysis <- function(project_name = "proteomics_project", force_r
       step_function = step_differential_analysis_single,
       output_files = c(
         paste0("dea_results/", group_name, "/t_test_result.csv"),
-        paste0("dea_results/", group_name, "/gsea_results/gsea_results.csv")
+        paste0("dea_results/", group_name, "/regulated_data.csv"),
+        paste0("dea_results/", group_name, "/volcano_plot.pdf"),
+        paste0("dea_results/", group_name, "/threshold_info.csv")
       ),
-      dependencies = c("normalization", "prepare_comparisons"),
+      dependencies = c("normalization"),
+      config_to_track = comparison,
       cleanup_patterns = paste0("dea_results/", group_name, "/.*"),
-      config_to_track = comparison, # Track this specific comparison's config
       group_name = group_name,
       config = config
     )
@@ -638,27 +716,69 @@ rerun_step <- function(step_names, project_name = "proteomics_project") {
 # Print configuration summary
 print_config <- function() {
   config <- get_config()
-  cat("=== Current Configuration ===\n")
+  cat("=== Current Configuration ===\n\n")
+
+  cat("--- Data Files ---\n")
   cat("Base directory:", config$base_dir, "\n")
   cat("Protein expression file:", config$protein_expr_file, "\n")
   cat("Sample info file:", config$sample_info_file, "\n")
+
+  cat("\n--- Normalization Settings ---\n")
   cat("NA threshold:", config$na_threshold, "\n")
   cat("Normalization method:", config$normalization_method, "\n")
   cat("Imputation method:", config$imputation_method, "\n")
+
+  cat("\n--- Threshold Settings ---\n")
+  cat("FC threshold mode:", config$fc_threshold_mode)
+  if (config$fc_threshold_mode == "auto") {
+    cat(" (will auto-calculate using coverage analysis)\n")
+    if (config$global_fc_threshold != 1.5) {
+      cat("  [!] global_fc_threshold (", config$global_fc_threshold, ") will be IGNORED\n")
+    }
+  } else if (config$fc_threshold_mode == "global") {
+    cat(" -> global_fc_threshold:", config$global_fc_threshold, "\n")
+  } else {
+    cat(" (per-comparison or interactive)\n")
+  }
+
+  cat("P-value threshold mode:", config$p_threshold_mode)
+  if (config$p_threshold_mode == "global") {
+    cat(" -> global_p_threshold:", config$global_p_threshold, "\n")
+  } else {
+    cat(" (per-comparison or interactive)\n")
+  }
+
+  cat("\n--- Comparisons ---\n")
   cat("Number of comparisons:", length(config$comparisons), "\n")
   if (length(config$comparisons) > 0) {
     for (i in 1:length(config$comparisons)) {
       comp <- config$comparisons[[i]]
-      # Handle vector control/treatment
       ctrl_str <- if (length(comp$control) > 1) paste(comp$control, collapse = "+") else comp$control
       treat_str <- if (length(comp$treatment) > 1) paste(comp$treatment, collapse = "+") else comp$treatment
-      cat(sprintf("  Comparison %d: %s vs %s (%s)\n", i, treat_str, ctrl_str, comp$name))
+
+      # Check for thresholds in comparison
+      thresh_parts <- c()
+      if (!is.null(comp$fc_threshold)) {
+        if (config$fc_threshold_mode == "auto") {
+          thresh_parts <- c(thresh_parts, paste0("FC=", comp$fc_threshold, " [IGNORED]"))
+        } else {
+          thresh_parts <- c(thresh_parts, paste0("FC=", comp$fc_threshold))
+        }
+      }
+      if (!is.null(comp$p_threshold)) {
+        thresh_parts <- c(thresh_parts, paste0("P=", comp$p_threshold))
+      }
+      thresh_str <- if (length(thresh_parts) > 0) paste0(" [", paste(thresh_parts, collapse = ", "), "]") else ""
+
+      cat(sprintf("  %d. %s vs %s (%s)%s\n", i, treat_str, ctrl_str, comp$name, thresh_str))
     }
   }
+
+  cat("\n--- Enrichment Analysis ---\n")
   cat("GO background file:", config$go_background_file, "\n")
   cat("KEGG background file:", config$kegg_background_file, "\n")
   cat("Custom colors:", ifelse(is.null(config$custom_colors), "Not specified", "Specified"), "\n")
-  cat("=============================\n")
+  cat("\n=============================\n")
 }
 
 # Enhanced status check with troubleshooting
