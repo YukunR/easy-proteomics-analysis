@@ -28,7 +28,7 @@ create_workspace <- function(project_name, base_dir = "./res/") {
 # Load checkpoint status
 load_checkpoint <- function(workspace) {
   if (file.exists(workspace$checkpoint_file)) {
-    checkpoint <- fromJSON(workspace$checkpoint_file)
+    checkpoint <- fromJSON(workspace$checkpoint_file, simplifyDataFrame = FALSE)
 
     # Handle potential interrupted state from previous session
     if (!is.null(checkpoint$current_step)) {
@@ -46,12 +46,18 @@ load_checkpoint <- function(workspace) {
       checkpoint$step_start_time <- NULL
 
       # Save the cleaned state
-      write(toJSON(checkpoint, pretty = TRUE), workspace$checkpoint_file)
+      write(toJSON(checkpoint, pretty = TRUE, auto_unbox = TRUE), workspace$checkpoint_file)
     }
 
-    # Ensure config_hashes exists
+    # Ensure required fields exist
     if (is.null(checkpoint$config_hashes)) {
       checkpoint$config_hashes <- list()
+    }
+    if (is.null(checkpoint$config_details)) {
+      checkpoint$config_details <- list()
+    }
+    if (is.null(checkpoint$step_dependencies)) {
+      checkpoint$step_dependencies <- list()
     }
 
     return(checkpoint)
@@ -61,7 +67,9 @@ load_checkpoint <- function(workspace) {
       current_step = NULL,
       last_update = Sys.time(),
       file_hashes = list(),
-      config_hashes = list(), # Store configuration hashes
+      config_hashes = list(),
+      config_details = list(),
+      step_dependencies = list(), # Store dependencies for each step
       comparison_groups_completed = character(0),
       step_start_time = NULL
     ))
@@ -71,7 +79,7 @@ load_checkpoint <- function(workspace) {
 # Save checkpoint status
 save_checkpoint <- function(workspace, checkpoint) {
   checkpoint$last_update <- Sys.time()
-  write(toJSON(checkpoint, pretty = TRUE), workspace$checkpoint_file)
+  write(toJSON(checkpoint, pretty = TRUE, auto_unbox = TRUE), workspace$checkpoint_file)
 }
 
 # Log messages with timestamp
@@ -130,25 +138,210 @@ cleanup_step_files <- function(workspace, step_name, file_patterns = NULL) {
   }
 }
 
-# Check if configuration has changed for a step
-check_config_changed <- function(workspace, step_name, config_value) {
-  checkpoint <- load_checkpoint(workspace)
-
-  current_hash <- calculate_object_hash(config_value)
-  stored_hash <- checkpoint$config_hashes[[step_name]]
-
-  if (is.null(stored_hash)) {
-    return(TRUE) # No stored hash, treat as changed
+# Helper: define value equality
+values_equal <- function(a, b) {
+  # Both NULL
+  if (is.null(a) && is.null(b)) {
+    return(TRUE)
   }
-
-  return(current_hash != stored_hash)
+  # One is NULL, the other is not
+  if (is.null(a) || is.null(b)) {
+    return(FALSE)
+  }
+  # Both numeric (integer / double)
+  if (is.numeric(a) && is.numeric(b)) {
+    return(isTRUE(all.equal(a, b, tolerance = 1e-8)))
+  }
+  # Both data frames
+  if (is.data.frame(a) && is.data.frame(b)) {
+    return(isTRUE(all.equal(a, b, tolerance = 1e-8)))
+  }
+  # Both lists (including generic lists)
+  if (is.list(a) && is.list(b)) {
+    # Different length
+    if (length(a) != length(b)) {
+      return(FALSE)
+    }
+    # Different names (if names are present)
+    if (!identical(names(a), names(b))) {
+      return(FALSE)
+    }
+    # Compare each element recursively
+    for (i in seq_along(a)) {
+      if (!values_equal(a[[i]], b[[i]])) {
+        return(FALSE)
+      }
+    }
+    return(TRUE)
+  }
+  # Fallback: strict comparison
+  identical(a, b)
 }
 
-# Save configuration hash for a step
-save_config_hash <- function(workspace, step_name, config_value) {
+# Compare two config objects and report differences
+compare_configs <- function(old_config, new_config) {
+  differences <- list()
+
+  # Get all keys from both configs
+  all_keys <- unique(c(names(old_config), names(new_config)))
+
+  for (key in all_keys) {
+    old_val <- old_config[[key]]
+    new_val <- new_config[[key]]
+
+    # Handle NULL values
+    if (is.null(old_val) && is.null(new_val)) {
+      next
+    } else if (is.null(old_val)) {
+      differences[[key]] <- list(old = "NULL", new = new_val)
+    } else if (is.null(new_val)) {
+      differences[[key]] <- list(old = old_val, new = "NULL")
+    } else if (!values_equal(old_val, new_val)) {
+      differences[[key]] <- list(old = old_val, new = new_val)
+    }
+  }
+
+  return(differences)
+}
+
+# Format config differences for display
+format_config_differences <- function(differences) {
+  if (length(differences) == 0) {
+    return("No differences")
+  }
+
+  lines <- c()
+  for (key in names(differences)) {
+    old_val <- differences[[key]]$old
+    new_val <- differences[[key]]$new
+
+    # Format values for display
+    format_value <- function(val) {
+      if (is.list(val)) {
+        paste(names(val), "=", unlist(val), collapse = ", ")
+      } else if (length(val) > 1) {
+        paste(val, collapse = ", ")
+      } else {
+        as.character(val)
+      }
+    }
+
+    old_str <- format_value(old_val)
+    new_str <- format_value(new_val)
+
+    lines <- c(lines, sprintf("  - %s: %s -> %s", key, old_str, new_str))
+  }
+
+  return(paste(lines, collapse = "\n"))
+}
+
+# Check if configuration has changed for a step (with detailed reporting)
+check_config_changed <- function(workspace, step_name, config_value, verbose = TRUE) {
   checkpoint <- load_checkpoint(workspace)
-  checkpoint$config_hashes[[step_name]] <- calculate_object_hash(config_value)
-  save_checkpoint(workspace, checkpoint)
+  current_hash <- calculate_object_hash(config_value)
+  stored_hash <- checkpoint$config_hashes[[step_name]]
+  stored_config <- checkpoint$config_details[[step_name]]
+
+  if (is.null(stored_hash)) {
+    return(list(changed = TRUE, reason = "No previous configuration found"))
+  }
+
+  if (current_hash != stored_hash) {
+    # Find what changed
+
+    differences <- compare_configs(stored_config, config_value)
+    diff_text <- format_config_differences(differences)
+
+    if (verbose) {
+      cat("\n")
+      cat("================================================================\n")
+      cat("Configuration changed for step:", step_name, "\n")
+      cat("================================================================\n")
+      cat("Changes detected:\n")
+      cat(diff_text, "\n")
+      cat("================================================================\n")
+      cat("This step will be re-executed.\n\n")
+    }
+
+    return(list(changed = TRUE, reason = "Configuration changed", differences = differences))
+  }
+
+  return(list(changed = FALSE))
+}
+
+# Find all steps that depend on a given step (using stored dependencies)
+find_dependent_steps <- function(workspace, step_name) {
+  checkpoint <- load_checkpoint(workspace)
+
+  dependent_steps <- c()
+
+  # Check each completed step's dependencies
+  for (completed_step in checkpoint$completed_steps) {
+    step_deps <- checkpoint$step_dependencies[[completed_step]]
+
+    if (!is.null(step_deps) && step_name %in% step_deps) {
+      dependent_steps <- c(dependent_steps, completed_step)
+    }
+  }
+
+  return(unique(dependent_steps))
+}
+
+# Recursively find all downstream steps
+find_all_downstream_steps <- function(workspace, step_name) {
+  all_downstream <- c()
+  direct_dependents <- find_dependent_steps(workspace, step_name)
+
+  all_downstream <- c(all_downstream, direct_dependents)
+
+  # Recursively find dependents of dependents
+  for (dep_step in direct_dependents) {
+    indirect_dependents <- find_all_downstream_steps(workspace, dep_step)
+    all_downstream <- c(all_downstream, indirect_dependents)
+  }
+
+  return(unique(all_downstream))
+}
+
+# Invalidate all dependent steps when an upstream step needs to re-run
+invalidate_dependent_steps <- function(workspace, step_name, verbose = TRUE) {
+  checkpoint <- load_checkpoint(workspace)
+
+  # Find all downstream steps that need to be invalidated
+  steps_to_invalidate <- find_all_downstream_steps(workspace, step_name)
+
+  if (length(steps_to_invalidate) > 0) {
+    if (verbose) {
+      cat("\n")
+      cat("================================================================\n")
+      cat("Invalidating dependent steps due to re-run of:", step_name, "\n")
+      cat("================================================================\n")
+      cat("The following steps will be re-executed:\n")
+      for (s in steps_to_invalidate) {
+        cat("  -", s, "\n")
+      }
+      cat("================================================================\n\n")
+    }
+
+    log_message(
+      workspace,
+      paste("Invalidating", length(steps_to_invalidate), "dependent steps due to re-run of", step_name),
+      "INFO"
+    )
+
+    # Remove from completed steps
+    checkpoint$completed_steps <- setdiff(checkpoint$completed_steps, steps_to_invalidate)
+
+    # Clear config hashes for invalidated steps
+    for (step in steps_to_invalidate) {
+      checkpoint$config_hashes[[step]] <- NULL
+      checkpoint$config_details[[step]] <- NULL
+    }
+
+    save_checkpoint(workspace, checkpoint)
+  }
+
+  return(steps_to_invalidate)
 }
 
 # Main function to execute steps with checkpoint support
@@ -157,6 +350,12 @@ execute_step <- function(workspace, step_name, step_function,
                          dependencies = NULL, force_rerun = FALSE,
                          config_to_track = NULL, ...) {
   checkpoint <- load_checkpoint(workspace)
+
+  # Save dependencies for this step (for future dependency tracking)
+  if (!is.null(dependencies)) {
+    checkpoint$step_dependencies[[step_name]] <- dependencies
+    save_checkpoint(workspace, checkpoint)
+  }
 
   # Check for interrupted step and reset if necessary
   if (!is.null(checkpoint$current_step) && checkpoint$current_step == step_name) {
@@ -179,16 +378,22 @@ execute_step <- function(workspace, step_name, step_function,
 
   # Check if configuration has changed (triggers rerun)
   config_changed <- FALSE
+  config_change_info <- NULL
   if (!is.null(config_to_track)) {
-    current_hash <- calculate_object_hash(config_to_track)
-    stored_hash <- checkpoint$config_hashes[[step_name]]
+    config_change_info <- check_config_changed(workspace, step_name, config_to_track, verbose = TRUE)
+    config_changed <- config_change_info$changed
 
-    if (!is.null(stored_hash) && current_hash != stored_hash) {
-      config_changed <- TRUE
+    if (config_changed && !is.null(config_change_info$reason)) {
       log_message(
         workspace,
-        paste("Configuration changed for step", step_name, "- will re-execute"), "INFO"
+        paste("Configuration changed for step", step_name, "-", config_change_info$reason), "INFO"
       )
+
+      # Invalidate all dependent steps
+      invalidate_dependent_steps(workspace, step_name, verbose = TRUE)
+
+      # Reload checkpoint after invalidation
+      checkpoint <- load_checkpoint(workspace)
     }
   }
 
@@ -219,10 +424,14 @@ execute_step <- function(workspace, step_name, step_function,
       )
       # Remove from completed list
       checkpoint$completed_steps <- setdiff(checkpoint$completed_steps, step_name)
+
+      # Also invalidate dependent steps
+      invalidate_dependent_steps(workspace, step_name, verbose = TRUE)
+      checkpoint <- load_checkpoint(workspace)
     }
   }
 
-  # If config changed, remove from completed steps
+  # If config changed, remove from completed steps (already done above, but ensure)
   if (config_changed) {
     checkpoint$completed_steps <- setdiff(checkpoint$completed_steps, step_name)
   }
@@ -242,6 +451,9 @@ execute_step <- function(workspace, step_name, step_function,
     {
       result <- step_function(workspace, ...)
 
+      # Reload checkpoint (it might have been modified during step execution)
+      checkpoint <- load_checkpoint(workspace)
+
       # Verify output files and record hashes
       if (!is.null(output_files)) {
         for (file in output_files) {
@@ -257,9 +469,10 @@ execute_step <- function(workspace, step_name, step_function,
         }
       }
 
-      # Save configuration hash if tracking
+      # Save configuration hash and details if tracking
       if (!is.null(config_to_track)) {
         checkpoint$config_hashes[[step_name]] <- calculate_object_hash(config_to_track)
+        checkpoint$config_details[[step_name]] <- config_to_track
       }
 
       # Mark step as completed
@@ -277,6 +490,7 @@ execute_step <- function(workspace, step_name, step_function,
         cleanup_step_files(workspace, step_name, cleanup_patterns)
       }
       # Clear current step on error
+      checkpoint <- load_checkpoint(workspace)
       checkpoint$current_step <- NULL
       checkpoint$step_start_time <- NULL
       save_checkpoint(workspace, checkpoint)
@@ -288,6 +502,7 @@ execute_step <- function(workspace, step_name, step_function,
         cleanup_step_files(workspace, step_name, cleanup_patterns)
       }
       # Clear current step on interrupt
+      checkpoint <- load_checkpoint(workspace)
       checkpoint$current_step <- NULL
       checkpoint$step_start_time <- NULL
       save_checkpoint(workspace, checkpoint)
@@ -324,33 +539,58 @@ check_project_status <- function(project_name = "proteomics_project", base_dir =
     cat("This step will be restarted on next run.\n")
   }
 
-  # Show tracked configurations
-  if (length(checkpoint$config_hashes) > 0) {
-    cat("\nTracked configurations:\n")
-    for (step in names(checkpoint$config_hashes)) {
-      cat("  -", step, "\n")
+  # Show step dependencies
+  if (length(checkpoint$step_dependencies) > 0) {
+    cat("\n=== Step Dependencies ===\n")
+    for (step in names(checkpoint$step_dependencies)) {
+      deps <- checkpoint$step_dependencies[[step]]
+      if (!is.null(deps) && length(deps) > 0) {
+        cat("  ", step, " <- ", paste(deps, collapse = ", "), "\n", sep = "")
+      }
     }
+  }
+
+  # Show tracked configurations with details
+  if (length(checkpoint$config_details) > 0) {
+    cat("\n=== Tracked Configurations ===\n")
+    for (step in names(checkpoint$config_details)) {
+      cat("\n[", step, "]\n", sep = "")
+      config <- checkpoint$config_details[[step]]
+      if (is.list(config)) {
+        for (key in names(config)) {
+          val <- config[[key]]
+          if (is.null(val)) {
+            cat("  ", key, ": NULL\n", sep = "")
+          } else if (is.list(val)) {
+            cat("  ", key, ": ", paste(names(val), "=", unlist(val), collapse = ", "), "\n", sep = "")
+          } else {
+            cat("  ", key, ": ", paste(as.character(val), collapse = ", "), "\n", sep = "")
+          }
+        }
+      }
+    }
+    cat("\n")
   }
 
   # Show file integrity status
   if (length(checkpoint$file_hashes) > 0) {
-    cat("\nFile integrity check:\n")
+    cat("=== File Integrity Check ===\n")
     for (file in names(checkpoint$file_hashes)) {
       full_path <- file.path(base_dir, file)
       if (file.exists(full_path)) {
         current_hash <- calculate_file_hash(full_path)
         if (current_hash == checkpoint$file_hashes[[file]]) {
-          cat("  ✓", file, "- OK\n")
+          cat("  ✓", file, "\n")
         } else {
-          cat("  ✗", file, "- CORRUPTED (will be regenerated)\n")
+          cat("  ✗", file, "- CORRUPTED\n")
         }
       } else {
-        cat("  ✗", file, "- MISSING (will be regenerated)\n")
+        cat("  ✗", file, "- MISSING\n")
       }
     }
   }
 
-  cat("======================\n\n")
+  cat("=============================\n\n")
 
   # Show recent logs
   if (file.exists(workspace$log_file)) {
@@ -435,19 +675,36 @@ verify_checkpoint_files <- function(project_name = "proteomics_project", base_di
   return(invisible(all_ok))
 }
 
-# Force rerun specific steps
-force_rerun_steps <- function(step_names, project_name = "proteomics_project", base_dir = "./res/") {
+# Force rerun specific steps (and their dependents)
+force_rerun_steps <- function(step_names, project_name = "proteomics_project",
+                              base_dir = "./res/", include_dependents = TRUE) {
   workspace <- create_workspace(project_name, base_dir)
   checkpoint <- load_checkpoint(workspace)
-  checkpoint$completed_steps <- setdiff(checkpoint$completed_steps, step_names)
 
-  # Also clear config hashes for these steps
-  for (step in step_names) {
+  all_steps_to_rerun <- step_names
+
+  # Find and include dependent steps if requested
+  if (include_dependents) {
+    for (step in step_names) {
+      dependents <- find_all_downstream_steps(workspace, step)
+      all_steps_to_rerun <- c(all_steps_to_rerun, dependents)
+    }
+    all_steps_to_rerun <- unique(all_steps_to_rerun)
+  }
+
+  checkpoint$completed_steps <- setdiff(checkpoint$completed_steps, all_steps_to_rerun)
+
+  # Also clear config hashes and details for these steps
+  for (step in all_steps_to_rerun) {
     checkpoint$config_hashes[[step]] <- NULL
+    checkpoint$config_details[[step]] <- NULL
   }
 
   save_checkpoint(workspace, checkpoint)
-  log_message(workspace, paste("Forced rerun of steps:", paste(step_names, collapse = ", ")))
+  log_message(workspace, paste("Forced rerun of steps:", paste(all_steps_to_rerun, collapse = ", ")))
+  cat("Steps marked for rerun:", paste(all_steps_to_rerun, collapse = ", "), "\n")
+
+  return(invisible(all_steps_to_rerun))
 }
 
 # Clean project (restart from beginning)
@@ -460,29 +717,4 @@ clean_project <- function(project_name = "proteomics_project", base_dir = "./res
     file.remove(workspace$log_file)
   }
   cat("Project", project_name, "cleaned, next run will start from beginning\n")
-}
-
-# Invalidate dependent steps when a step needs to rerun
-invalidate_dependent_steps <- function(workspace, step_name, dependency_map) {
-  checkpoint <- load_checkpoint(workspace)
-
-  # Find all steps that depend on this step
-  steps_to_invalidate <- c()
-
-  for (dep_step in names(dependency_map)) {
-    if (step_name %in% dependency_map[[dep_step]]) {
-      steps_to_invalidate <- c(steps_to_invalidate, dep_step)
-    }
-  }
-
-  if (length(steps_to_invalidate) > 0) {
-    log_message(
-      workspace,
-      paste("Invalidating dependent steps:", paste(steps_to_invalidate, collapse = ", ")), "INFO"
-    )
-    checkpoint$completed_steps <- setdiff(checkpoint$completed_steps, steps_to_invalidate)
-    save_checkpoint(workspace, checkpoint)
-  }
-
-  return(steps_to_invalidate)
 }
