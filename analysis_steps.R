@@ -539,6 +539,11 @@ run_proteomics_analysis <- function(project_name = "proteomics_project", force_r
     step_name = "normalization",
     step_function = step_normalization,
     output_files = c("normalization_results.rds"),
+    config_to_track = list(
+      normalization_method = config$normalization_method,
+      imputation_method = config$imputation_method,
+      na_threshold = config$na_threshold
+    ),
     cleanup_patterns = c("norm_results/.*"),
     config = config
   )
@@ -573,8 +578,8 @@ run_proteomics_analysis <- function(project_name = "proteomics_project", force_r
     step_name = "prepare_comparisons",
     step_function = step_prepare_comparisons,
     output_files = "comparison_groups.rds",
+    config_to_track = config$comparisons,
     dependencies = "normalization",
-    config_to_track = config$comparisons, # Track comparison config changes
     config = config
   )
 
