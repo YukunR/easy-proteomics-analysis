@@ -21,6 +21,7 @@ get_config <- function() {
   config$sample_info_file <- if (exists("sample_info_file", envir = .GlobalEnv)) get("sample_info_file", envir = .GlobalEnv) else "./data/sample_info.txt"
   config$na_threshold <- if (exists("na_threshold", envir = .GlobalEnv)) get("na_threshold", envir = .GlobalEnv) else 0.6
   config$normalization_method <- if (exists("normalization_method", envir = .GlobalEnv)) get("normalization_method", envir = .GlobalEnv) else "global"
+  config$use_common_proteins_for_norm <- if (exists("use_common_proteins_for_norm", envir = .GlobalEnv)) get("use_common_proteins_for_norm", envir = .GlobalEnv) else FALSE
   config$imputation_method <- if (exists("imputation_method", envir = .GlobalEnv)) get("imputation_method", envir = .GlobalEnv) else "knn"
   config$comparisons <- if (exists("comparisons", envir = .GlobalEnv)) get("comparisons", envir = .GlobalEnv) else list()
   config$go_background_file <- if (exists("go_background_file", envir = .GlobalEnv)) get("go_background_file", envir = .GlobalEnv) else "./data/all_uniprot_go_background.csv"
@@ -65,7 +66,8 @@ step_normalization <- function(workspace, config = NULL) {
   normalized_data <- normalize_by_median(
     separated_data$expression_data,
     sample_info,
-    normalization_method = config$normalization_method
+    normalization_method = config$normalization_method,
+    use_common_proteins = config$use_common_proteins_for_norm
   )
   log2_data <- log2_transform(normalized_data)
   imputed_data <- filter_and_impute(

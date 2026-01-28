@@ -25,9 +25,9 @@ library(RColorBrewer)
 #'
 #' @keywords internal
 separate_delimited_ids <- function(protein_data,
-                                  id_col = "Accession",
-                                  gene_col = "GeneName",
-                                  desc_col = "Description",
+                                   id_col = "Accession",
+                                   gene_col = "GeneName",
+                                   desc_col = "Description",
                                    sep = ";") {
   # Check if required columns exist
   required_cols <- c(id_col, gene_col, desc_col)
@@ -87,97 +87,97 @@ resolve_duplicate_ids <- function(protein_data,
     return(protein_data)
   }
 
-    cat("Duplicate protein IDs detected:\n")
+  cat("Duplicate protein IDs detected:\n")
 
-    # Show detailed information for duplicate IDs
-    for (dup_id in duplicate_ids) {
+  # Show detailed information for duplicate IDs
+  for (dup_id in duplicate_ids) {
     dup_rows <- which(protein_data[[id_col]] == dup_id)
-      cat(sprintf("\nID: %s (appears %d times)\n", dup_id, length(dup_rows)))
+    cat(sprintf("\nID: %s (appears %d times)\n", dup_id, length(dup_rows)))
 
-      # Show key information for duplicate rows
+    # Show key information for duplicate rows
     dup_data <- protein_data[dup_rows, c(id_col, gene_col, desc_col)]
-      print(dup_data)
+    print(dup_data)
 
-      # Check if expression data is identical
+    # Check if expression data is identical
     expr_cols <- !colnames(protein_data) %in% c(id_col, gene_col, desc_col)
     expr_data_dup <- protein_data[dup_rows, expr_cols, drop = FALSE]
 
-      if (nrow(expr_data_dup) > 1) {
-        identical_expr <- all(apply(expr_data_dup, 2, function(x) length(unique(x)) == 1))
-        cat(sprintf("Expression data identical: %s\n", ifelse(identical_expr, "Yes", "No")))
-      }
+    if (nrow(expr_data_dup) > 1) {
+      identical_expr <- all(apply(expr_data_dup, 2, function(x) length(unique(x)) == 1))
+      cat(sprintf("Expression data identical: %s\n", ifelse(identical_expr, "Yes", "No")))
     }
+  }
 
-    # Handle duplicates based on strategy
-    if (handle_duplicates == "error") {
-      stop(paste(
-        "Duplicate protein IDs found:", paste(duplicate_ids, collapse = ", "),
-        "\nPlease check your data or use other handling strategies (first/last/aggregate/interactive)"
-      ))
-    } else if (handle_duplicates == "interactive") {
-      cat("\nPlease choose how to handle duplicate IDs:\n")
-      cat("1. Keep first occurrence\n")
-      cat("2. Keep last occurrence\n")
-      cat("3. Average expression data (only when annotation is identical)\n")
-      cat("4. Stop execution to manually fix original file\n")
+  # Handle duplicates based on strategy
+  if (handle_duplicates == "error") {
+    stop(paste(
+      "Duplicate protein IDs found:", paste(duplicate_ids, collapse = ", "),
+      "\nPlease check your data or use other handling strategies (first/last/aggregate/interactive)"
+    ))
+  } else if (handle_duplicates == "interactive") {
+    cat("\nPlease choose how to handle duplicate IDs:\n")
+    cat("1. Keep first occurrence\n")
+    cat("2. Keep last occurrence\n")
+    cat("3. Average expression data (only when annotation is identical)\n")
+    cat("4. Stop execution to manually fix original file\n")
 
-      choice <- readline(prompt = "Enter your choice (1-4): ")
+    choice <- readline(prompt = "Enter your choice (1-4): ")
 
-      if (choice == "1") {
-        handle_duplicates <- "first"
-      } else if (choice == "2") {
-        handle_duplicates <- "last"
-      } else if (choice == "3") {
-        handle_duplicates <- "aggregate"
-      } else {
-        stop("Execution stopped. Please fix duplicate IDs in your original data file.")
-      }
+    if (choice == "1") {
+      handle_duplicates <- "first"
+    } else if (choice == "2") {
+      handle_duplicates <- "last"
+    } else if (choice == "3") {
+      handle_duplicates <- "aggregate"
+    } else {
+      stop("Execution stopped. Please fix duplicate IDs in your original data file.")
     }
+  }
 
-    # Execute duplicate handling
-    if (handle_duplicates == "first") {
+  # Execute duplicate handling
+  if (handle_duplicates == "first") {
     protein_data <- protein_data[!duplicated(protein_data[[id_col]]), ]
-      cat("Kept first occurrence for each duplicate ID\n")
-    } else if (handle_duplicates == "last") {
+    cat("Kept first occurrence for each duplicate ID\n")
+  } else if (handle_duplicates == "last") {
     protein_data <- protein_data[!duplicated(protein_data[[id_col]], fromLast = TRUE), ]
-      cat("Kept last occurrence for each duplicate ID\n")
-    } else if (handle_duplicates == "aggregate") {
-      # Check if aggregation is safe
-      can_aggregate <- TRUE
-      for (dup_id in duplicate_ids) {
+    cat("Kept last occurrence for each duplicate ID\n")
+  } else if (handle_duplicates == "aggregate") {
+    # Check if aggregation is safe
+    can_aggregate <- TRUE
+    for (dup_id in duplicate_ids) {
       dup_rows <- which(protein_data[[id_col]] == dup_id)
       dup_annotations <- protein_data[dup_rows, c(gene_col, desc_col)]
 
-        if (!all(apply(dup_annotations, 2, function(x) length(unique(x)) == 1))) {
-          cat(sprintf("Warning: ID %s has inconsistent annotation, cannot safely aggregate\n", dup_id))
-          can_aggregate <- FALSE
-        }
+      if (!all(apply(dup_annotations, 2, function(x) length(unique(x)) == 1))) {
+        cat(sprintf("Warning: ID %s has inconsistent annotation, cannot safely aggregate\n", dup_id))
+        can_aggregate <- FALSE
       }
+    }
 
-      if (!can_aggregate) {
-        stop("Cannot aggregate: duplicate IDs with inconsistent annotations found. Please choose another handling method.")
-      }
+    if (!can_aggregate) {
+      stop("Cannot aggregate: duplicate IDs with inconsistent annotations found. Please choose another handling method.")
+    }
 
-      # Perform aggregation
+    # Perform aggregation
     expr_cols <- !colnames(protein_data) %in% c(id_col, gene_col, desc_col)
 
-      # Average expression data
+    # Average expression data
     aggregated_data <- protein_data %>%
-        group_by(across(all_of(c(id_col, gene_col, desc_col)))) %>%
+      group_by(across(all_of(c(id_col, gene_col, desc_col)))) %>%
       summarise(across(all_of(colnames(protein_data)[expr_cols]), mean, na.rm = TRUE),
-          .groups = "drop"
-        ) %>%
-        as.data.frame()
+        .groups = "drop"
+      ) %>%
+      as.data.frame()
 
     protein_data <- aggregated_data
-      cat("Averaged expression data for duplicate IDs\n")
-    }
+    cat("Averaged expression data for duplicate IDs\n")
+  }
 
   # Save duplicate handling report if duplicates were processed
   if (length(duplicate_ids) > 0) {
-  if (!dir.exists(output_dir)) {
-    dir.create(output_dir, recursive = TRUE)
-  }
+    if (!dir.exists(output_dir)) {
+      dir.create(output_dir, recursive = TRUE)
+    }
     report <- data.frame(
       Processing_Time = Sys.time(),
       Duplicate_Count = length(duplicate_ids),
@@ -339,6 +339,14 @@ calculate_na_percentage <- function(expression_data,
 #'     \item "global" - Global normalization (default)
 #'     \item "within_group" - Within-group normalization
 #'   }
+#' @param use_common_proteins Logical, whether to use only commonly identified proteins
+#'   (present in 100% of samples within normalization scope) for calculating normalization
+#'   factors. Default FALSE uses all proteins. When TRUE:
+#'   \itemize{
+#'     \item "global" - Uses proteins present in all samples
+#'     \item "within_group" - Uses proteins present in all samples within each group
+#'   }
+#'   Note: Normalization factors are applied to ALL proteins regardless of this setting.
 #' @param sample_col Sample name column, default "Sample"
 #' @param group_col Group column, default "Group"
 #'
@@ -348,11 +356,23 @@ calculate_na_percentage <- function(expression_data,
 normalize_by_median <- function(expression_data,
                                 sample_info = NULL,
                                 normalization_method = "global",
+                                use_common_proteins = FALSE,
                                 sample_col = "Sample",
                                 group_col = "Group") {
   if (normalization_method == "global") {
     # Global normalization: calculate normalization factors across all samples
-    medians <- apply(expression_data, 2, function(x) median(x, na.rm = TRUE))
+    # Filter to common proteins if requested
+    if (use_common_proteins) {
+      common_proteins <- rowSums(is.na(expression_data)) == 0
+      if (sum(common_proteins) == 0) {
+        stop("No proteins found in all samples. Cannot use use_common_proteins = TRUE.")
+      }
+      medians <- apply(expression_data[common_proteins, , drop = FALSE], 2,
+                       function(x) median(x, na.rm = TRUE))
+      cat("Using", sum(common_proteins), "common proteins for global normalization.\n")
+    } else {
+      medians <- apply(expression_data, 2, function(x) median(x, na.rm = TRUE))
+    }
     norm_factors <- mean(medians) / medians
     normalized_data <- sweep(expression_data, 2, norm_factors, FUN = "*")
 
@@ -386,8 +406,24 @@ normalize_by_median <- function(expression_data,
 
       # Get current group data
       group_data <- expression_data[, valid_samples, drop = FALSE]
+
+      # Filter to common proteins if requested
+      if (use_common_proteins) {
+        common_proteins <- rowSums(is.na(group_data)) == 0
+        if (sum(common_proteins) == 0) {
+          warning(paste("No common proteins in group:", group,
+                       ". Using all proteins for this group."))
+          means <- apply(group_data, 2, function(x) mean(x, na.rm = TRUE))
+        } else {
+          means <- apply(group_data[common_proteins, , drop = FALSE], 2,
+                        function(x) mean(x, na.rm = TRUE))
+          cat("Group", group, ":", sum(common_proteins), "common proteins used.\n")
+        }
+      } else {
+        means <- apply(group_data, 2, function(x) mean(x, na.rm = TRUE))
+      }
+
       # Calculate normalization factors
-      means <- apply(group_data, 2, function(x) mean(x, na.rm = TRUE))
       norm_factors <- mean(means) / means
       # Apply normalization
       normalized_data[, valid_samples] <- sweep(group_data, 2, norm_factors, FUN = "*")
