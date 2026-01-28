@@ -9,32 +9,26 @@ library(cowplot)
 library(multiUS)
 library(RColorBrewer)
 
-#' Separate protein data into annotation and expression matrices
+#' Separate delimited protein IDs
 #'
 #' @description
-#' Separates protein data containing both annotation information and expression values
-#' into two separate components for downstream analysis
+#' Handles separation of protein IDs that contain delimiters (e.g., semicolons)
+#' into separate rows
 #'
-#' @param protein_data Data frame containing protein annotation and expression data
+#' @param protein_data Data frame containing protein data
 #' @param id_col Column name for protein ID, default "Accession"
 #' @param gene_col Column name for gene names, default "GeneName"
 #' @param desc_col Column name for protein descriptions, default "Description"
-#' @param output_dir Output directory path
 #' @param sep Separator for handling multiple IDs, default ";"
-#' @param handle_duplicates How to handle duplicate IDs: "error", "interactive", "first", "last", "aggregate"
 #'
-#' @return List containing two elements:
-#'   \item{expression_data}{Expression data matrix}
-#'   \item{annotation_data}{Protein annotation information}
+#' @return Data frame with separated rows
 #'
-#' @export
-separate_protein_data <- function(protein_data,
+#' @keywords internal
+separate_delimited_ids <- function(protein_data,
                                   id_col = "Accession",
                                   gene_col = "GeneName",
                                   desc_col = "Description",
-                                  output_dir = "./",
-                                  sep = ";",
-                                  handle_duplicates = "error") {
+                                   sep = ";") {
   # Check if required columns exist
   required_cols <- c(id_col, gene_col, desc_col)
   missing_cols <- setdiff(required_cols, colnames(protein_data))
@@ -44,38 +38,69 @@ separate_protein_data <- function(protein_data,
 
   # Handle multiple IDs separated by delimiter
   # Check if `id_col` contains the specified delimiter
-  contain_delimiter <- any(sep %in% protein_data[[id_col]])
+  contain_delimiter <- any(grepl(sep, protein_data[[id_col]], fixed = TRUE))
+
   if (contain_delimiter) {
     protein_data_separated <- separate_rows(protein_data,
       all_of(c(id_col, gene_col, desc_col)),
       sep = sep
     )
     protein_data_separated <- as.data.frame(protein_data_separated)
+    cat("Separated delimited IDs using separator:", sep, "\n")
   } else {
     # In case the delimiter is incorrectly recognized
     protein_data_separated <- as.data.frame(protein_data)
+    cat("No delimiter found, data unchanged.\n")
   }
 
+  return(protein_data_separated)
+}
+
+#' Resolve duplicate protein IDs
+#'
+#' @description
+#' Detects and resolves duplicate protein IDs using various strategies
+#'
+#' @param protein_data Data frame containing protein data
+#' @param id_col Column name for protein ID, default "Accession"
+#' @param gene_col Column name for gene names, default "GeneName"
+#' @param desc_col Column name for protein descriptions, default "Description"
+#' @param handle_duplicates How to handle duplicate IDs: "error", "interactive", "first", "last", "aggregate"
+#' @param output_dir Output directory path
+#'
+#' @return Data frame with duplicates resolved
+#'
+#' @keywords internal
+resolve_duplicate_ids <- function(protein_data,
+                                  id_col = "Accession",
+                                  gene_col = "GeneName",
+                                  desc_col = "Description",
+                                  handle_duplicates = "error",
+                                  output_dir = "./") {
   # Check for duplicate IDs
-  protein_ids <- protein_data_separated[[id_col]]
+  protein_ids <- protein_data[[id_col]]
   duplicate_ids <- protein_ids[duplicated(protein_ids) | duplicated(protein_ids, fromLast = TRUE)]
   duplicate_ids <- unique(duplicate_ids)
 
-  if (length(duplicate_ids) > 0) {
+  if (length(duplicate_ids) == 0) {
+    cat("No duplicate IDs found.\n")
+    return(protein_data)
+  }
+
     cat("Duplicate protein IDs detected:\n")
 
     # Show detailed information for duplicate IDs
     for (dup_id in duplicate_ids) {
-      dup_rows <- which(protein_data_separated[[id_col]] == dup_id)
+    dup_rows <- which(protein_data[[id_col]] == dup_id)
       cat(sprintf("\nID: %s (appears %d times)\n", dup_id, length(dup_rows)))
 
       # Show key information for duplicate rows
-      dup_data <- protein_data_separated[dup_rows, c(id_col, gene_col, desc_col)]
+    dup_data <- protein_data[dup_rows, c(id_col, gene_col, desc_col)]
       print(dup_data)
 
       # Check if expression data is identical
-      expr_cols <- !colnames(protein_data_separated) %in% c(id_col, gene_col, desc_col)
-      expr_data_dup <- protein_data_separated[dup_rows, expr_cols, drop = FALSE]
+    expr_cols <- !colnames(protein_data) %in% c(id_col, gene_col, desc_col)
+    expr_data_dup <- protein_data[dup_rows, expr_cols, drop = FALSE]
 
       if (nrow(expr_data_dup) > 1) {
         identical_expr <- all(apply(expr_data_dup, 2, function(x) length(unique(x)) == 1))
@@ -111,17 +136,17 @@ separate_protein_data <- function(protein_data,
 
     # Execute duplicate handling
     if (handle_duplicates == "first") {
-      protein_data_separated <- protein_data_separated[!duplicated(protein_data_separated[[id_col]]), ]
+    protein_data <- protein_data[!duplicated(protein_data[[id_col]]), ]
       cat("Kept first occurrence for each duplicate ID\n")
     } else if (handle_duplicates == "last") {
-      protein_data_separated <- protein_data_separated[!duplicated(protein_data_separated[[id_col]], fromLast = TRUE), ]
+    protein_data <- protein_data[!duplicated(protein_data[[id_col]], fromLast = TRUE), ]
       cat("Kept last occurrence for each duplicate ID\n")
     } else if (handle_duplicates == "aggregate") {
       # Check if aggregation is safe
       can_aggregate <- TRUE
       for (dup_id in duplicate_ids) {
-        dup_rows <- which(protein_data_separated[[id_col]] == dup_id)
-        dup_annotations <- protein_data_separated[dup_rows, c(gene_col, desc_col)]
+      dup_rows <- which(protein_data[[id_col]] == dup_id)
+      dup_annotations <- protein_data[dup_rows, c(gene_col, desc_col)]
 
         if (!all(apply(dup_annotations, 2, function(x) length(unique(x)) == 1))) {
           cat(sprintf("Warning: ID %s has inconsistent annotation, cannot safely aggregate\n", dup_id))
@@ -134,41 +159,25 @@ separate_protein_data <- function(protein_data,
       }
 
       # Perform aggregation
-      expr_cols <- !colnames(protein_data_separated) %in% c(id_col, gene_col, desc_col)
+    expr_cols <- !colnames(protein_data) %in% c(id_col, gene_col, desc_col)
 
       # Average expression data
-      aggregated_data <- protein_data_separated %>%
+    aggregated_data <- protein_data %>%
         group_by(across(all_of(c(id_col, gene_col, desc_col)))) %>%
-        summarise(across(all_of(colnames(protein_data_separated)[expr_cols]), mean, na.rm = TRUE),
+      summarise(across(all_of(colnames(protein_data)[expr_cols]), mean, na.rm = TRUE),
           .groups = "drop"
         ) %>%
         as.data.frame()
 
-      protein_data_separated <- aggregated_data
+    protein_data <- aggregated_data
       cat("Averaged expression data for duplicate IDs\n")
     }
-  }
-
-  # Set row names as protein IDs (should be unique now)
-  rownames(protein_data_separated) <- protein_data_separated[[id_col]]
-
-  # Separate annotation information
-  annotation_data <- protein_data_separated[, c(id_col, gene_col, desc_col), drop = FALSE]
-
-  # Separate expression data
-  expression_data <- protein_data_separated[, !colnames(protein_data_separated) %in% c(id_col, gene_col, desc_col), drop = FALSE]
-
-  # Save annotation information
-  if (!dir.exists(output_dir)) {
-    dir.create(output_dir, recursive = TRUE)
-  }
-  write.csv(annotation_data,
-    file = file.path(output_dir, "protein_annotations.csv"),
-    row.names = FALSE
-  )
 
   # Save duplicate handling report if duplicates were processed
   if (length(duplicate_ids) > 0) {
+  if (!dir.exists(output_dir)) {
+    dir.create(output_dir, recursive = TRUE)
+  }
     report <- data.frame(
       Processing_Time = Sys.time(),
       Duplicate_Count = length(duplicate_ids),
@@ -182,6 +191,67 @@ separate_protein_data <- function(protein_data,
     )
     cat(sprintf("Duplicate handling report saved to: %s\n", file.path(output_dir, "duplicate_handling_report.csv")))
   }
+
+  return(protein_data)
+}
+
+#' Separate protein data into annotation and expression matrices
+#'
+#' @description
+#' Separates protein data containing both annotation information and expression values
+#' into two separate components for downstream analysis. This is a convenience wrapper
+#' that handles both ID separation and duplicate resolution.
+#'
+#' @param protein_data Data frame containing protein annotation and expression data
+#' @param id_col Column name for protein ID, default "Accession"
+#' @param gene_col Column name for gene names, default "GeneName"
+#' @param desc_col Column name for protein descriptions, default "Description"
+#' @param output_dir Output directory path
+#' @param sep Separator for handling multiple IDs, default ";"
+#' @param handle_duplicates How to handle duplicate IDs: "error", "interactive", "first", "last", "aggregate"
+#'
+#' @return List containing two elements:
+#'   \item{expression_data}{Expression data matrix}
+#'   \item{annotation_data}{Protein annotation information}
+#'
+#' @export
+separate_protein_data <- function(protein_data,
+                                  id_col = "Accession",
+                                  gene_col = "GeneName",
+                                  desc_col = "Description",
+                                  output_dir = "./",
+                                  sep = ";",
+                                  handle_duplicates = "error") {
+  # Create output directory
+  if (!dir.exists(output_dir)) {
+    dir.create(output_dir, recursive = TRUE)
+  }
+
+  # Step 1: Separate delimited IDs
+  protein_data_separated <- separate_delimited_ids(
+    protein_data, id_col, gene_col, desc_col, sep
+  )
+
+  # Step 2: Resolve duplicate IDs
+  protein_data_final <- resolve_duplicate_ids(
+    protein_data_separated, id_col, gene_col, desc_col,
+    handle_duplicates, output_dir
+  )
+
+  # Step 3: Set row names and extract components
+  rownames(protein_data_final) <- protein_data_final[[id_col]]
+
+  # Separate annotation information
+  annotation_data <- protein_data_final[, c(id_col, gene_col, desc_col), drop = FALSE]
+
+  # Separate expression data
+  expression_data <- protein_data_final[, !colnames(protein_data_final) %in% c(id_col, gene_col, desc_col), drop = FALSE]
+
+  # Save annotation information
+  write.csv(annotation_data,
+    file = file.path(output_dir, "protein_annotations.csv"),
+    row.names = FALSE
+  )
 
   return(list(
     expression_data = expression_data,
