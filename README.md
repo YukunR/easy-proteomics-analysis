@@ -1,417 +1,510 @@
-# Proteomics Data Analysis Pipeline
-
-An automated proteomics data analysis tool designed for bioinformatics beginners, featuring checkpoint/resume functionality and covering the complete workflow from data normalization to differential expression analysis.
-
-## Key Features
-
-- **Checkpoint/Resume** - Resume analysis from interruption points without starting over
-- **One-click Analysis** - Complete analysis with a single command after configuration
-- **Complete Workflow** - Covers normalization, PCA, batch removal, differential expression, enrichment analysis, and GSEA
-- **Batch Effect Removal** - Optional ComBat-based batch correction with interactive guidance
-- **Smart Recovery** - Automatically detects interrupted states and continues from correct position
-- **Detailed Logging** - Records execution status and timing for each step
-- **Troubleshooting Tools** - Built-in diagnostic tools to help resolve issues
-
-## Analysis Workflow
-
-1. **Data Normalization and Imputation** - Missing value handling, normalization, log2 transformation
-2. **Principal Component Analysis (PCA)** - Sample quality control and visualization
-3. **Batch Effect Removal (Optional)** - Interactive batch assessment and correction using ComBat
-4. **Comparison Group Preparation** - Automatic generation of comparison groups based on configuration
-5. **Differential Expression Analysis** - t-tests, volcano plots, coverage analysis
-6. **Functional Enrichment Analysis** - GO and KEGG pathway enrichment
-7. **Gene Set Enrichment Analysis (GSEA)** - Pathway-level functional analysis
-
-## Installation and Setup
-
-### Step 1: Install R and RStudio
-
-#### Download and Install R
-
-1. Go to [https://cran.r-project.org/](https://cran.r-project.org/)
-2. Choose your operating system (Windows/Mac/Linux)
-3. Download and install the latest version of R (4.4.0 or higher recommended)
-
-#### Download and Install RStudio (Recommended)
-
-1. Go to [https://www.rstudio.com/products/rstudio/download/](https://www.rstudio.com/products/rstudio/download/)
-2. Download RStudio Desktop (free version)
-3. Install RStudio after R installation is complete
-
-### Step 2: Set Up the Project Environment
-
-#### Open RStudio and Install renv
-
-```r
-# Install renv package manager
-install.packages("renv")
-```
-
-#### Clone or Download This Project
-
-1. Download the project files to your computer
-2. Open RStudio
-3. Go to File → Open Project and select the project folder
-4. Or set working directory: `setwd("path/to/your/project")`
-
-#### Restore Package Environment
-
-```r
-# Restore all required packages
-renv::restore()
-```
-
-## Quick Start
-
-### Step 1: Prepare Your Data Files
-
-Ensure you have the following files in the `data/` folder:
-
-#### Sample Information File (See `data/sample_info.txt` for an example.)
-
-Tab-separated file with sample names and groups:
-
-```
-Sample	Group
-NC_1	NC
-NC_2	NC
-NC_3	NC
-HC_1	HC
-HC_2	HC
-HC_3	HC
-HD_1	HD
-HD_2	HD
-HD_3	HD
-```
-
-#### Protein Expression Data (See `data/origin_data.txt` for an example.)
-
-Tab-separated file with protein expression values (first columns should be protein annotations, followed by sample columns)
-
-#### Batch Information (Optional)
-
-If you know batch information beforehand, prepare a CSV file:
-
-```csv
-Sample,Batch
-NC_1,batch1
-NC_2,batch1
-NC_3,batch1
-HC_1,batch2
-HC_2,batch2
-HC_3,batch2
-HD_1,batch3
-HD_2,batch3
-HD_3,batch3
-```
-
-### Step 2: Modify Configuration Script
-
-Modify the `Configs` section in `main.R`, then run the script with `Ctrl + Shift + Enter`.
-
-### Step 3: Monitor Progress (Optional)
-
-```r
-# Check current status
-check_status()
-
-# View configuration
-print_config()
-```
-
-### Step 4: Batch Effect Assessment
-
-After PCA analysis, the pipeline will:
-
-1. Display the PCA plot (PC1 vs PC2)
-2. Ask if you want to perform batch removal
-3. If yes, guide you through batch assignment with multiple options:
-   - Enter batch for each sample individually
-   - Enter all batches as comma-separated values
-   - Specify that samples are already in batch order
-   - Load batch information from a file
-
-## Common Operations
-
-### Resume After Interruption
-
-If analysis is interrupted (power failure, manual interruption, etc.), simply rerun the same command:
-
-```r
-result <- run_proteomics_analysis()
-```
-
-### Rerun Specific Steps
-
-```r
-# Rerun normalization step
-rerun_step("normalization")
-
-# Rerun batch removal step
-rerun_step("batch_removal")
-
-# Rerun multiple steps
-rerun_step(c("pca", "batch_removal", "differential_analysis_KI_vs_Old"))
-
-# Rerun all differential analysis for all comparison groups
-rerun_step(c("differential_analysis_KI_vs_Old",
-            "differential_analysis_Old_vs_Young",
-            "differential_analysis_KI_vs_Young"))
-```
-
-### Start Fresh
-
-```r
-# Safe cleanup (with confirmation prompt)
-clean_project_safe()
-
-# Then rerun analysis
-result <- run_proteomics_analysis()
-```
-
-## Output Files Description
-
-### Normalization Results (`[base_dir]/norm_results/`)
-
-- `protein_abundance_data.csv` - Normalized protein abundance data
-- `normalization_workflow_comparison.pdf` - Normalization workflow visualization
-- `color_scheme.csv` - Color scheme for plots
-
-### PCA Analysis Results (`[base_dir]/pca_results/`)
-
-- `pca_biplot_PC1_PC2.pdf` - Main PCA biplot (used for batch assessment)
-- `pca_biplot_PC1_PC3.pdf` - Alternative PC combination
-- `pca_biplot_PC2_PC3.pdf` - Alternative PC combination
-- `pca_screeplot.pdf` - Variance explained by each PC
-- `pca_variance_explained.pdf` - Bar plot of variance explained
-- `pca_loadings.pdf` - Top contributing variables
-- `sample_correlation_heatmap.pdf` - Sample correlation heatmap
-- `sample_dendrogram.pdf` - Sample clustering dendrogram
-
-### Batch Removal Results (`[base_dir]/batch_removal_results/`)
-
-Only created if batch removal is performed:
-
-- `batch_assignments.csv` - Record of sample-batch assignments
-- `batch_correction_pca_by_batch.pdf` - PCA comparison colored by batch
-- `batch_correction_pca_by_group.pdf` - PCA comparison colored by biological group
-- `batch_correction_pc1_boxplot.pdf` - PC1 distribution by batch
-- `batch_correction_summary.pdf` - Combined visualization of all batch effects
-- `pca_after_correction/` - Complete PCA analysis on corrected data
-
-### Differential Expression Results (`[base_dir]/dea_results/[comparison_name]/`)
-
-Each comparison group has its own folder containing:
-
-- `t_test_result.csv` - Complete t-test results
-- `regulated_data.csv` - Differentially expressed protein summary
-- `volcano_plot.pdf` - Volcano plot
-- `enrichment_results/` - Enrichment analysis results
-  - `analysis_up.csv` - Upregulated protein enrichment results
-  - `analysis_down.csv` - Downregulated protein enrichment results
-  - `GObarplot_*.tiff` - GO enrichment bar plots
-  - `KEGGdotplot_*.tiff` - KEGG enrichment dot plots
-- `gsea_results/` - GSEA analysis results
-  - `gsea_results.csv` - GSEA results in CSV format
-  - `gsea_ridge_plot.pdf` - GSEA results visualized as a ridge plot
-  - `gsea_summary_plot.pdf` - GSEA summary shown as a dot plot
-  - `pathway_plots/` - Individual enrichment plots (gseaplot) for each pathway
-
-## Configuration Parameters
-
-### Comparison Groups Configuration
-
-```r
-comparisons <- list(
-  list(control = "control_group_name", treatment = "treatment_group_name", name = "comparison_name"),
-  # Add more comparisons as needed
-)
-```
-
-### Parameter Descriptions
-
-- `na_threshold`: Missing value filter threshold; proteins with missing rates above this value will be removed
-- `normalization_method`:
-  - `"global"`: Global median normalization
-  - `"within_group"`: Within-group normalization
-- `imputation_method`:
-  - `"knn"`: K-nearest neighbors imputation
-  - `"perseus"`: Perseus software method
-
-## Batch Effect Removal
-
-### When to Use Batch Removal
-
-Consider batch removal if:
-
-- Samples cluster by processing batch rather than biological groups in PCA
-- Technical batches (e.g., different run dates, operators) are known
-- Systematic differences exist between sample processing groups
-
-### Batch Assignment Methods
-
-1. **Interactive Entry**: Enter batch for each sample when prompted
-2. **Comma-separated List**: Provide all batch assignments at once
-3. **Sequential Batches**: Specify number of batches if samples are already ordered
-4. **File Upload**: Load pre-prepared batch assignments from CSV
-
-### Reference Batch Selection
-
-- Optionally specify a reference batch for ComBat
-- If not specified, ComBat will use default parameters
-- Reference batch should be the most stable or control batch
-
-## Troubleshooting
-
-### Common Issues
-
-**Q: Analysis restarted from beginning after interruption?**
-
-```r
-# Check project status
-check_status()
-
-# Use troubleshooting tool
-troubleshoot()
-
-# If interrupted step detected, reset status
-reset_interrupted()
-```
-
-**Q: A step keeps failing?**
-
-```r
-# View detailed logs
-check_status()  # Shows last 10 log lines
-
-# Force rerun that step
-rerun_step("step_name")
-```
-
-**Q: Want to change parameters and reanalyze?**
-
-```r
-# After modifying configuration parameters, clean project
-clean_project_safe()
-
-# Rerun analysis
-result <- run_proteomics_analysis()
-```
-
-**Q: Batch removal failed with error?**
-
-Common causes:
-
-- Batches are confounded with biological groups
-- Some batches have only one sample
-- Missing values in critical samples
-
-Solutions:
-
-- Ensure each batch has multiple samples
-- Check that biological groups span multiple batches
-- Review sample quality before batch removal
-
-### Diagnostic Tools
-
-```r
-# Comprehensive troubleshooting
-troubleshoot()
-
-# Check project status
-check_status()
-
-# Check batch removal status
-check_batch_status()
-
-# Verify project structure
-verify_files()
-
-# Reset interrupted state
-reset_interrupted()
-
-# View current configuration
-print_config()
-```
-
-### Log Files
-
-Detailed execution logs are saved in `[base_dir]/analysis.log`, containing start time, completion status, and error messages for each step.
-
-## Understanding Results
-
-### Differential Expression Results
-
-- `log2_fold_change`: Log2 fold change; positive values indicate upregulation, negative values indicate downregulation
-- `p_value`: Statistical test p-value
-- `regulation_group`: Regulation direction ("up", "down", "ns")
-
-### Enrichment Analysis Results
-
-- `p.adjust`: Multiple testing corrected p-value
-- `Count`: Number of genes enriched in this pathway
-- `GeneRatio`: Ratio of enriched genes to input genes
-
-### Batch Correction Assessment
-
-Review the following plots to assess batch correction effectiveness:
-
-- **PCA by Batch**: Samples should be less clustered by batch after correction
-- **PCA by Group**: Biological groups should remain well-separated
-- **PC1 Boxplot**: Batch-related variation in PC1 should be reduced
-
-## Best Practices for Beginners
-
-### Before Starting
-
-1. Ensure your sample information file matches exactly with sample names in expression data
-2. Check that group names in comparisons match those in sample_info.txt
-3. Verify all required data files are in the correct locations
-4. Consider batch effects if samples were processed on different days/batches
-
-### During Analysis
-
-1. Don't close R/RStudio while analysis is running
-2. Monitor the console output for any error messages
-3. If you see errors, use `troubleshoot()` for guidance
-4. Carefully review PCA plots before deciding on batch removal
-
-### After Completion
-
-1. Check the `[base_dir]/analysis.log` file for any warnings
-2. Verify that all expected output files were generated
-3. Review the normalization plots before interpreting differential expression results
-4. If batch removal was performed, check the comparison plots
-
-## Getting Help
-
-If you encounter issues:
-
-1. Run `troubleshoot()` for diagnostic information
-2. Check `[base_dir]/analysis.log` for detailed error messages
-3. Verify data file formats are correct
-4. Ensure all required R packages are properly installed
-5. For batch removal issues, check that batches aren't confounded with groups
-
-## Package Management with renv
-
-This project uses `renv` for reproducible package management:
-
-```r
-# Check package status
-renv::status()
-
-# Update packages
-renv::update()
-
-# Create snapshot of current packages
-renv::snapshot()
-```
-
-## License
-
-This project is intended for academic research purposes. Please cite appropriately when using.
+[![GitHub](https://img.shields.io/badge/GitHub-Repository-blue)](https://github.com/YukunR/easy-proteomics-analysis)
+[![Gitee](https://img.shields.io/badge/Gitee-Repository-red)](https://gitee.com/yukun-r/easy-proteomics-analysis)
+
+# Easy Proteomics Analysis
+
+## 目录 / Table of Contents
+
+**中文**
+
+- [简介](#简介)
+- [主要特性](#主要特性)
+- [安装](#安装)
+- [快速开始](#快速开始)
+- [理解结果](#理解结果)
+- [详细文档](#详细文档)
+- [获取帮助](#获取帮助)
+- [许可证](#许可证)
+
+**English**
+
+- [Introduction](#introduction)
+- [Key Features](#key-features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Understanding Results](#understanding-results)
+- [Documentation](#documentation)
+- [Getting Help](#getting-help)
+- [License](#license)
 
 ---
 
-**Note**: This tool is designed for bioinformatics beginners to simplify the proteomics data analysis workflow. For more complex analyses or customized functionality, please consult with bioinformatics experts.
+## 简介
+
+Easy Proteomics Analysis 是一个专为蛋白质组学差异分析设计的 **R 语言工具**。它提供了从数据预处理到统计分析再到可视化的完整自动化工作流程，特别适合需要处理大规模蛋白质组学数据但缺乏编程经验的研究人员。
+
+本工具基于配置文件运行，您只需修改 `main.R` 中的参数，无需编写任何 R 代码。同时提供了智能检查点系统，确保分析过程可以随时中断和恢复。
+
+## 主要特性
+
+- **🔄 检查点与恢复** - 智能检查点系统，分析可随时中断并从上次位置恢复，永不丢失进度
+- **📊 完整分析流程** - 一站式解决方案：数据加载 → 缺失值插补 → 数据标准化 → PCA 分析 → 差异分析 → 火山图 → 富集分析
+- **🎯 灵活阈值设定** - 自动计算最佳 FC 阈值，支持全局或逐比较设置，交互式调整
+- **👥 零编程门槛** - 基于配置文件，只需修改 main.R 参数，无需编写 R 代码
+
+## 安装
+
+### 系统要求
+
+- **R 语言**：R >= 4.4.0
+- **RStudio**：推荐使用（可选）
+- **操作系统**：Windows、macOS 或 Linux
+
+### 安装步骤
+
+#### 1. 安装 R 和 RStudio
+
+**安装 R 语言：**
+
+- 访问 R 官方网站：https://cran.r-project.org/
+- 下载并安装适合您操作系统的最新版本（>= 4.4.0）
+
+**安装 RStudio（推荐）：**
+
+- 访问 RStudio 官方网站：https://posit.co/download/rstudio-desktop/
+- 下载并安装 RStudio Desktop 免费版
+
+> 💡 **新手提示**：RStudio 是一个强大的 R 集成开发环境，强烈推荐使用。它让 R 编程变得更加简单直观。
+
+#### 2. 获取项目代码
+
+**方法 1：使用 Git（推荐）**
+
+```bash
+# 从 Gitee 克隆
+git clone https://gitee.com/yukun-r/easy-proteomics-analysis.git
+
+# 或从 GitHub 克隆
+git clone https://github.com/YukunR/easy-proteomics-analysis.git
+```
+
+**方法 2：直接下载**
+
+- 访问 [Gitee](https://gitee.com/yukun-r/easy-proteomics-analysis) 或 [GitHub](https://github.com/YukunR/easy-proteomics-analysis) 项目页面
+- 点击 "下载" 或 "Download ZIP"
+- 解压到您选择的目录
+
+#### 3. 打开项目
+
+1. 启动 RStudio
+2. 点击菜单 `File` → `Open Project...`
+3. 浏览到项目目录，选择 `QuickProtAna.Rproj` 文件
+4. 点击 "Open"
+
+#### 4. 恢复 R 包环境
+
+项目使用 `renv` 管理 R 包依赖。首次使用时，在 R 控制台运行：
+
+```r
+# 恢复项目依赖的 R 包
+renv::restore()
+```
+
+这个过程可能需要 10-30 分钟，取决于您的网络速度。
+
+**常见问题：**
+
+- **下载速度慢？** 配置国内镜像：
+
+  ```r
+  options(repos = c(CRAN = "https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+  renv::restore()
+  ```
+
+- **包安装失败？** 查看 [详细文档](DOCUMENTATION.md#故障排除) 中的解决方案
+
+## 快速开始
+
+### 1. 准备数据文件
+
+您需要准备两个文件：
+
+**① 蛋白质表达数据文件** ([示例文件](data/origin_data.txt))
+
+- 制表符分隔的文本文件
+- 第一列：蛋白质 ID
+- 其他列：各样本的蛋白质丰度值
+
+```
+Protein	Sample1	Sample2	Sample3	Sample4
+P12345	1250.5	1180.3	850.2	920.9
+Q67890	520.2	510.1	1030.5	1120.1
+```
+
+**② 样本信息文件** ([示例文件](data/sample_info.txt))
+
+- 制表符分隔的文本文件
+- 第一列：样本名称（必须与表达数据文件的列名一致）
+- 第二列：分组信息
+
+```
+Sample	Group
+Sample1	Control
+Sample2	Control
+Sample3	Treatment
+Sample4	Treatment
+```
+
+> 💡 **提示**：点击上面的"示例文件"链接查看实际的数据格式
+
+### 2. 配置参数
+
+打开 `main.R` 文件，修改以下关键参数：
+
+```r
+# 数据文件路径
+protein_expr_file <- "./data/origin_data.txt"
+sample_info_file <- "./data/sample_info.txt"
+
+# 定义比较组
+comparisons <- list(
+  list(control = "Control", treatment = "Treatment", name = "Treatment_vs_Control")
+)
+
+# 其他参数通常使用默认值即可
+```
+
+### 3. 运行分析
+
+在 RStudio 中：
+
+1. 打开 `main.R` 文件
+2. 点击 `Source` 按钮（或按 `Ctrl+Shift+S`）
+3. 等待分析完成
+
+或在 R 控制台中运行：
+
+```r
+source("main.R")
+```
+
+### 4. 查看结果
+
+所有结果保存在 `res/` 目录中：
+
+- 火山图、PCA 图等可视化结果（PNG 格式）
+- 差异分析统计结果（CSV 格式）
+- 标准化和插补后的数据
+
+## 理解结果
+
+### 输出文件结构
+
+```
+res/
+├── normalized_data.csv          # 标准化后的数据
+├── pca_plot.png                 # PCA 图
+└── comparison_Treatment_vs_Control/  # 比较结果目录
+    ├── volcano_plot.png         # 火山图
+    ├── differential_results.csv # 完整差异分析结果
+    ├── significant_up.csv       # 显著上调蛋白质
+    └── significant_down.csv     # 显著下调蛋白质
+```
+
+### 关键结果文件
+
+**火山图 (volcano_plot.png)**
+
+- 可视化展示差异表达蛋白质
+- 红色点：显著上调
+- 蓝色点：显著下调
+- 灰色点：无显著变化
+
+**差异分析结果 (differential_results.csv)**
+
+- 包含所有蛋白质的统计信息
+- 主要列：
+  - `Protein`: 蛋白质 ID
+  - `log2FC`: log2 倍数变化
+  - `pvalue`: P 值
+  - `adj_pvalue`: 调整后 P 值（FDR）
+  - `significant`: 是否显著
+  - `regulation`: Up/Down/Not significant
+
+### 结果解读
+
+**显著性判断标准：**
+
+- 倍数变化（FC）> 阈值（默认自动计算）
+- 调整后 P 值 < 0.05
+
+**如何解读火山图：**
+
+- X 轴：log2(倍数变化) - 表示表达变化的方向和幅度
+- Y 轴：-log10(P 值) - 表示统计显著性
+- 越靠近图的上方，统计显著性越高
+- 越远离中心，表达变化越大
+
+> 📖 更多详细说明请参阅 [详细文档](DOCUMENTATION.md#理解结果)
+
+## 详细文档
+
+如需了解更多信息，请参阅 [DOCUMENTATION.md](DOCUMENTATION.md)，包括：
+
+- 详细的 R 和 RStudio 安装指南
+- renv 环境恢复详细说明
+- 数据文件格式要求
+- 所有配置选项详解
+- 完整的分析流程说明
+- 高级功能使用方法
+- 故障排除指南
+- 常见问题解答
+
+## 获取帮助
+
+如果您遇到问题或有功能建议，请在以下平台提交 Issue：
+
+- **Gitee**: https://gitee.com/yukun-r/easy-proteomics-analysis/issues
+- **GitHub**: https://github.com/YukunR/easy-proteomics-analysis/issues
+
+**提交 Issue 时，请包含：**
+
+- 问题的详细描述
+- 错误信息（如有）
+- 您的 R 版本（运行 `R.version.string` 查看）
+- 您的操作系统
+
+## 许可证
+
+本项目采用 MIT 许可证。详见 [LICENSE](LICENSE) 文件。
+
+---
+
+## Introduction
+
+Easy Proteomics Analysis is an **R-based tool** designed for proteomics differential analysis. It provides a complete automated workflow from data preprocessing to statistical analysis and visualization, particularly suitable for researchers who need to process large-scale proteomics data but lack programming experience.
+
+This tool runs based on configuration files. You only need to modify parameters in `main.R` without writing any R code. It also provides a smart checkpoint system that ensures the analysis can be interrupted and resumed at any time.
+
+## Key Features
+
+- **🔄 Checkpoint & Resume** - Smart checkpoint system allows analysis to be interrupted and resumed from the last position, never losing progress
+- **📊 Complete Workflow** - One-stop solution: Data loading → Imputation → Normalization → PCA → Differential analysis → Volcano plots → Enrichment analysis
+- **🎯 Flexible Thresholds** - Automatic FC threshold calculation, supports global or per-comparison settings, interactive adjustment
+- **👥 No Coding Required** - Configuration-based, only need to modify main.R parameters, no R coding required
+
+## Installation
+
+### Requirements
+
+- **R Language**: R >= 4.4.0
+- **RStudio**: Recommended (optional)
+- **Operating System**: Windows, macOS, or Linux
+
+### Installation Steps
+
+#### 1. Install R and RStudio
+
+**Install R:**
+
+- Visit R official website: https://cran.r-project.org/
+- Download and install the latest version for your OS (>= 4.4.0)
+
+**Install RStudio (Recommended):**
+
+- Visit RStudio official website: https://posit.co/download/rstudio-desktop/
+- Download and install RStudio Desktop free version
+
+> 💡 **Beginner Tip**: RStudio is a powerful R integrated development environment, highly recommended. It makes R programming much simpler and more intuitive.
+
+#### 2. Get Project Code
+
+**Method 1: Using Git (Recommended)**
+
+```bash
+# Clone from Gitee
+git clone https://gitee.com/yukun-r/easy-proteomics-analysis.git
+
+# Or clone from GitHub
+git clone https://github.com/YukunR/easy-proteomics-analysis.git
+```
+
+**Method 2: Direct Download**
+
+- Visit [Gitee](https://gitee.com/yukun-r/easy-proteomics-analysis) or [GitHub](https://github.com/YukunR/easy-proteomics-analysis) project page
+- Click "Download" or "Download ZIP"
+- Extract to your chosen directory
+
+#### 3. Open Project
+
+1. Launch RStudio
+2. Click menu `File` → `Open Project...`
+3. Navigate to project directory and select `QuickProtAna.Rproj` file
+4. Click "Open"
+
+#### 4. Restore R Package Environment
+
+The project uses `renv` to manage R package dependencies. On first use, run in R console:
+
+```r
+# Restore project R package dependencies
+renv::restore()
+```
+
+This process may take 10-30 minutes depending on your network speed.
+
+**Common Issues:**
+
+- **Slow download?** Configure domestic mirror:
+
+  ```r
+  options(repos = c(CRAN = "https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+  renv::restore()
+  ```
+
+- **Package installation fails?** See solutions in [Detailed Documentation](DOCUMENTATION.md#troubleshooting)
+
+## Quick Start
+
+### 1. Prepare Data Files
+
+You need to prepare two files:
+
+**① Protein Expression Data File** ([Example file](data/origin_data.txt))
+
+- Tab-separated text file
+- First column: Protein IDs
+- Other columns: Protein abundance values for each sample
+
+```
+Protein	Sample1	Sample2	Sample3	Sample4
+P12345	1250.5	1180.3	850.2	920.9
+Q67890	520.2	510.1	1030.5	1120.1
+```
+
+**② Sample Information File** ([Example file](data/sample_info.txt))
+
+- Tab-separated text file
+- First column: Sample names (must match column names in expression data file)
+- Second column: Group information
+
+```
+Sample	Group
+Sample1	Control
+Sample2	Control
+Sample3	Treatment
+Sample4	Treatment
+```
+
+> 💡 **Tip**: Click the "Example file" links above to view actual data formats
+
+### 2. Configure Parameters
+
+Open `main.R` file and modify the following key parameters:
+
+```r
+# Data file paths
+protein_expr_file <- "./data/origin_data.txt"
+sample_info_file <- "./data/sample_info.txt"
+
+# Define comparison groups
+comparisons <- list(
+  list(control = "Control", treatment = "Treatment", name = "Treatment_vs_Control")
+)
+
+# Other parameters can usually use default values
+```
+
+### 3. Run Analysis
+
+In RStudio:
+
+1. Open `main.R` file
+2. Click `Source` button (or press `Ctrl+Shift+S`)
+3. Wait for analysis to complete
+
+Or run in R console:
+
+```r
+source("main.R")
+```
+
+### 4. View Results
+
+All results are saved in `res/` directory:
+
+- Visualization results like volcano plots, PCA plots (PNG format)
+- Differential analysis statistical results (CSV format)
+- Normalized and imputed data
+
+## Understanding Results
+
+### Output File Structure
+
+```
+res/
+├── normalized_data.csv          # Normalized data
+├── pca_plot.png                 # PCA plot
+└── comparison_Treatment_vs_Control/  # Comparison results directory
+    ├── volcano_plot.png         # Volcano plot
+    ├── differential_results.csv # Complete differential analysis results
+    ├── significant_up.csv       # Significantly upregulated proteins
+    └── significant_down.csv     # Significantly downregulated proteins
+```
+
+### Key Result Files
+
+**Volcano Plot (volcano_plot.png)**
+
+- Visualizes differentially expressed proteins
+- Red dots: Significantly upregulated
+- Blue dots: Significantly downregulated
+- Gray dots: No significant change
+
+**Differential Analysis Results (differential_results.csv)**
+
+- Contains statistical information for all proteins
+- Main columns:
+  - `Protein`: Protein ID
+  - `log2FC`: log2 fold change
+  - `pvalue`: P-value
+  - `adj_pvalue`: Adjusted P-value (FDR)
+  - `significant`: Whether significant
+  - `regulation`: Up/Down/Not significant
+
+### Result Interpretation
+
+**Significance Criteria:**
+
+- Fold Change (FC) > threshold (automatically calculated by default)
+- Adjusted P-value < 0.05
+
+**How to Interpret Volcano Plot:**
+
+- X-axis: log2(Fold Change) - Indicates direction and magnitude of expression change
+- Y-axis: -log10(P-value) - Indicates statistical significance
+- Higher on the plot = higher statistical significance
+- Further from center = larger expression change
+
+> 📖 For more details, see [Detailed Documentation](DOCUMENTATION.md#understanding-results)
+
+## Documentation
+
+For more information, please refer to [DOCUMENTATION.md](DOCUMENTATION.md), including:
+
+- Detailed R and RStudio installation guide
+- renv environment restoration detailed instructions
+- Data file format requirements
+- All configuration options explained
+- Complete analysis workflow description
+- Advanced features usage
+- Troubleshooting guide
+- FAQ
+
+## Getting Help
+
+If you encounter issues or have feature suggestions, please submit an Issue on:
+
+- **Gitee**: https://gitee.com/yukun-r/easy-proteomics-analysis/issues
+- **GitHub**: https://github.com/YukunR/easy-proteomics-analysis/issues
+
+**When submitting an Issue, please include:**
+
+- Detailed description of the problem
+- Error messages (if any)
+- Your R version (run `R.version.string` to check)
+- Your operating system
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE) file for details.
