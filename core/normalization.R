@@ -558,13 +558,13 @@ create_distribution_plots <- function(melted_data,
   )
 
   # Density plot (by Sample, colored by Group)
-  density_plot <- ggplot(melted_data, aes(x = Intensity, color = Sample)) +
+  density_plot <- ggplot(melted_data, aes(x = Intensity, color = Group, group = Sample)) +
     geom_density(
       show.legend = TRUE,
       key_glyph = "timeseries",
       linewidth = 0.7
     ) +
-    scale_color_manual(values = sample_colors) +
+    scale_color_manual(values = actual_group_colors) +
     theme_bw() +
     theme(
       panel.grid = element_blank(),
@@ -573,7 +573,7 @@ create_distribution_plots <- function(melted_data,
       legend.position = "right"
     ) +
     xlab("log2(Intensity)") +
-    guides(color = guide_legend(title = "Sample"))
+    guides(color = guide_legend(title = "Group"))
 
   # Save density plot
   ggsave(density_plot,
