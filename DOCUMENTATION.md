@@ -291,14 +291,22 @@ sample_info_file <- "./data/sample_info.txt"  # 样本信息文件
 #### 2. 数据预处理配置
 
 ```r
-na_threshold <- 0.6  # 缺失值阈值
+na_threshold <- c(0.6, 0.9)  # 缺失值阈值（双阈值系统）
 ```
 
 **说明：**
 
-- 缺失值比例超过此阈值的蛋白质将被过滤掉
-- 默认值 0.6 表示如果某个蛋白质在 60% 以上的样本中缺失，则该蛋白质会被移除
-- 建议范围：0.5 - 0.7
+- 支持单值（向后兼容）或双值（推荐）模式
+- **单值模式**（如 `na_threshold <- 0.6`）：
+  - perseus/knn 模式：过滤缺失比例 > 0.6 的蛋白质
+  - auto 模式：不过滤，缺失比例 ≤ 0.6 使用 KNN，> 0.6 使用 Perseus
+- **双值模式**（推荐，如 `na_threshold <- c(0.6, 0.9)`）：
+  - perseus/knn 模式：过滤缺失比例 > 0.6 的蛋白质（第二个值被忽略）
+  - auto 模式：三层系统
+    - 缺失比例 < 0.6：KNN 插补（高置信度）
+    - 0.6 ≤ 缺失比例 < 0.9：Perseus 插补（中等置信度）
+    - 缺失比例 ≥ 0.9：舍弃蛋白质（缺失数据过多）
+- 建议值：`c(0.6, 0.9)` 或 `c(0.5, 0.8)`
 
 #### 3. 标准化方法配置
 
@@ -423,7 +431,7 @@ base_dir <- "./res/"
 protein_expr_file <- "./data/origin_data.txt"
 sample_info_file <- "./data/sample_info.txt"
 
-na_threshold <- 0.6
+na_threshold <- c(0.6, 0.9)  # 双阈值模式
 normalization_method <- "global"
 use_common_proteins_for_norm <- TRUE
 imputation_method <- "auto"
@@ -1839,13 +1847,23 @@ sample_info_file <- "./data/sample_info.txt"  # Sample information file
 #### 2. Data Preprocessing Parameters
 
 ```r
-na_threshold <- 0.6                    # NA ratio threshold
+na_threshold <- c(0.6, 0.9)            # NA ratio threshold (two-threshold system)
 normalization_method <- "global"       # Normalization method
 use_common_proteins_for_norm <- TRUE   # Use common proteins for normalization
 imputation_method <- "auto"            # Imputation method
 ```
 
-- **na_threshold**: Proteins with NA ratio exceeding this value will be removed (default: 0.6, i.e., 60%)
+- **na_threshold**: Supports single value (backward compatible) or two values (recommended)
+  - **Single value mode** (e.g., `na_threshold <- 0.6`):
+    - perseus/knn modes: Filter proteins with NA ratio > 0.6
+    - auto mode: No filtering, NA ≤ 0.6 uses KNN, NA > 0.6 uses Perseus
+  - **Two-value mode** (recommended, e.g., `na_threshold <- c(0.6, 0.9)`):
+    - perseus/knn modes: Filter proteins with NA ratio > 0.6 (second value ignored)
+    - auto mode: Three-tier system
+      - NA < 0.6: KNN imputation (high confidence)
+      - 0.6 ≤ NA < 0.9: Perseus imputation (moderate confidence)
+      - NA ≥ 0.9: Discard protein (too much missing data)
+  - Recommended: `c(0.6, 0.9)` or `c(0.5, 0.8)`
 - **normalization_method**:
   - `"global"`: Global normalization (recommended) - uses all samples
   - `"within_group"`: Within-group normalization - normalizes each group separately

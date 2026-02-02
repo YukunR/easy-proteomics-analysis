@@ -16,7 +16,11 @@ base_dir <- "./res/"
 protein_expr_file <- "./data/origin_data.txt"
 sample_info_file <- "./data/sample_info.txt"
 
-na_threshold <- 0.6  # Proteins with an NA ratio greater than this value will be discarded
+# Two-threshold system: c(threshold1, threshold2)
+# For auto mode: NA < 0.6 -> KNN, 0.6 <= NA < 0.9 -> Perseus, NA >= 0.9 -> discard
+# For perseus/knn modes: uses first value (0.6) for filtering
+# Single value (e.g., 0.6) maintains backward compatible behavior
+na_threshold <- c(0.6, 0.9)  
 normalization_method <- "global"  # should be one of "global" and "within_group"
 use_common_proteins_for_norm <- TRUE  # Use only commonly identified proteins for normalization
 imputation_method <- "auto"  # should be one of "auto", "knn" or "perseus"

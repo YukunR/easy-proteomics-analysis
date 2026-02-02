@@ -19,7 +19,7 @@ get_config <- function() {
   config$base_dir <- if (exists("base_dir", envir = .GlobalEnv)) get("base_dir", envir = .GlobalEnv) else "./res/"
   config$protein_expr_file <- if (exists("protein_expr_file", envir = .GlobalEnv)) get("protein_expr_file", envir = .GlobalEnv) else "./data/origin_data.txt"
   config$sample_info_file <- if (exists("sample_info_file", envir = .GlobalEnv)) get("sample_info_file", envir = .GlobalEnv) else "./data/sample_info.txt"
-  config$na_threshold <- if (exists("na_threshold", envir = .GlobalEnv)) get("na_threshold", envir = .GlobalEnv) else 0.6
+  config$na_threshold <- if (exists("na_threshold", envir = .GlobalEnv)) get("na_threshold", envir = .GlobalEnv) else c(0.6, 0.9)
   config$normalization_method <- if (exists("normalization_method", envir = .GlobalEnv)) get("normalization_method", envir = .GlobalEnv) else "global"
   config$use_common_proteins_for_norm <- if (exists("use_common_proteins_for_norm", envir = .GlobalEnv)) get("use_common_proteins_for_norm", envir = .GlobalEnv) else FALSE
   config$imputation_method <- if (exists("imputation_method", envir = .GlobalEnv)) get("imputation_method", envir = .GlobalEnv) else "knn"
@@ -726,7 +726,16 @@ print_config <- function() {
   cat("Sample info file:", config$sample_info_file, "\n")
 
   cat("\n--- Normalization Settings ---\n")
-  cat("NA threshold:", config$na_threshold, "\n")
+  if (length(config$na_threshold) == 1) {
+    cat("NA threshold:", config$na_threshold, "\n")
+  } else if (length(config$na_threshold) == 2) {
+    cat("NA threshold (two-threshold mode):", paste(config$na_threshold, collapse = ", "), "\n")
+    cat("  For auto mode: < ", config$na_threshold[1], " -> KNN, ",
+        config$na_threshold[1], " to ", config$na_threshold[2], " -> Perseus, >= ",
+        config$na_threshold[2], " -> discard\n", sep = "")
+  } else {
+    cat("NA threshold:", paste(config$na_threshold, collapse = ", "), "\n")
+  }
   cat("Normalization method:", config$normalization_method, "\n")
   cat("Imputation method:", config$imputation_method, "\n")
 

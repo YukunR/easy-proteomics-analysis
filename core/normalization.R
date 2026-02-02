@@ -883,13 +883,20 @@ impute_perseus_style <- function(expression_matrix,
 #'
 #' @param log2_data log2-transformed data matrix
 #' @param sample_info Sample information containing Sample and Group columns
-#' @param filter_threshold Filter threshold (NA threshold): maximum proportion of missing values allowed in each group, default 0.5
+#' @param filter_threshold Filter threshold (NA threshold): can be a single value or vector of 2 values, default c(0.6, 0.9)
+#'   \itemize{
+#'     \item Single value: backward compatible behavior
+#'     \item Vector of 2 values c(threshold1, threshold2): enables two-threshold system
+#'   }
 #' @param impute_method Imputation method: "perseus", "knn", or "auto", default "perseus"
 #'   \itemize{
-#'     \item "perseus" - Perseus-style imputation for all proteins (with filtering)
-#'     \item "knn" - KNN imputation for all proteins (with filtering)
-#'     \item "auto" - Adaptive (NO filtering): uses KNN for proteins with NA ratio <= filter_threshold,
-#'                    uses Perseus for proteins with NA ratio > filter_threshold
+#'     \item "perseus" - Perseus-style imputation for all proteins (with filtering at threshold[1])
+#'     \item "knn" - KNN imputation for all proteins (with filtering at threshold[1])
+#'     \item "auto" - Adaptive imputation with optional two-threshold system:
+#'       \itemize{
+#'         \item Single threshold: NO filtering, KNN for NA <= threshold, Perseus for NA > threshold
+#'         \item Two thresholds c(t1, t2): NA < t1 -> KNN, t1 <= NA < t2 -> Perseus, NA >= t2 -> discard
+#'       }
 #'   }
 #' @param sample_col Sample name column, default "Sample"
 #' @param group_col Group column, default "Group"
@@ -901,7 +908,7 @@ impute_perseus_style <- function(expression_matrix,
 #' @export
 filter_and_impute <- function(log2_data,
                               sample_info,
-                              filter_threshold = 0.5,
+                              filter_threshold = c(0.6, 0.9),
                               impute_method = "perseus",
                               sample_col = "Sample",
                               group_col = "Group",
@@ -921,6 +928,38 @@ filter_and_impute <- function(log2_data,
   # Validate impute_method
   if (!impute_method %in% c("perseus", "knn", "auto")) {
     stop("Invalid impute_method. Use 'perseus', 'knn', or 'auto'.")
+  }
+
+  # Validate filter_threshold parameter
+  if (!is.numeric(filter_threshold) || length(filter_threshold) == 0) {
+    stop("filter_threshold must be a numeric vector with 1 or 2 values")
+  }
+
+  if (length(filter_threshold) > 2) {
+    warning("filter_threshold has more than 2 values. Only the first 2 will be used.")
+    filter_threshold <- filter_threshold[1:2]
+  }
+
+  # Parse threshold values
+  if (length(filter_threshold) == 1) {
+    threshold_low <- filter_threshold[1]
+    threshold_high <- filter_threshold[1]
+    is_two_threshold_mode <- FALSE
+  } else {
+    threshold_low <- filter_threshold[1]
+    threshold_high <- filter_threshold[2]
+    is_two_threshold_mode <- TRUE
+
+    if (threshold_low > threshold_high) {
+      stop(sprintf(
+        "Invalid filter_threshold: first value (%.2f) must be <= second value (%.2f)",
+        threshold_low, threshold_high
+      ))
+    }
+
+    if (threshold_low < 0 || threshold_high > 1) {
+      stop("filter_threshold values must be between 0 and 1")
+    }
   }
 
   # Create output directory
@@ -975,24 +1014,46 @@ filter_and_impute <- function(log2_data,
 
   # Filtering step: only apply for perseus and knn methods, NOT for auto
   if (impute_method %in% c("perseus", "knn")) {
-    # Filter proteins: keep those with NA percentage <= threshold in ALL groups
+    # Filter proteins: keep those with NA percentage <= threshold_low in ALL groups
     filtered_proteins <- protein_stats %>%
-      filter(max_na_percentage <= filter_threshold)
+      filter(max_na_percentage <= threshold_low)
 
     cat("Filtering completed:\n")
     cat("Original proteins:", nrow(log2_data), "\n")
     cat("Proteins after filtering:", nrow(filtered_proteins), "\n")
-    cat("NA threshold:", filter_threshold, "\n")
+    if (is_two_threshold_mode) {
+      cat("NA threshold (using first value):", threshold_low, "\n")
+      cat("  (Note: second threshold value", threshold_high,
+          "is ignored for", impute_method, "mode)\n")
+    } else {
+      cat("NA threshold:", threshold_low, "\n")
+    }
 
     # Apply filtering
     filtered_log2_data <- log2_data[filtered_proteins$Accession, , drop = FALSE]
   } else {
-    # Auto mode: NO filtering, keep all proteins
-    cat("Auto mode: No filtering applied (all proteins retained for adaptive imputation)\n")
-    cat("Total proteins:", nrow(log2_data), "\n")
-    cat("NA threshold for method selection:", filter_threshold, "\n")
+    # Auto mode: filtering and adaptive imputation based on threshold(s)
+    if (is_two_threshold_mode) {
+      cat("Auto mode: Two-threshold adaptive imputation\n")
+      cat("Total proteins:", nrow(log2_data), "\n")
+      cat(sprintf("  NA ratio < %.2f: KNN imputation\n", threshold_low))
+      cat(sprintf("  %.2f <= NA ratio < %.2f: Perseus imputation\n",
+                  threshold_low, threshold_high))
+      cat(sprintf("  NA ratio >= %.2f: Discard (filter out)\n", threshold_high))
 
-    filtered_log2_data <- log2_data
+      # Apply filtering: remove proteins with NA ratio >= threshold_high
+      filtered_proteins <- protein_stats %>%
+        filter(max_na_percentage < threshold_high)
+
+      cat("Proteins after filtering:", nrow(filtered_proteins), "\n")
+      filtered_log2_data <- log2_data[filtered_proteins$Accession, , drop = FALSE]
+    } else {
+      cat("Auto mode: No filtering applied (all proteins retained for adaptive imputation)\n")
+      cat("Total proteins:", nrow(log2_data), "\n")
+      cat("NA threshold for method selection:", threshold_low, "\n")
+
+      filtered_log2_data <- log2_data
+    }
   }
 
   # Group data by groups for imputation
@@ -1025,8 +1086,16 @@ filter_and_impute <- function(log2_data,
     # NA ratio > threshold -> Perseus (more missing, use random imputation)
     # NA ratio <= threshold -> KNN (less missing, use neighbor-based imputation)
     cat("Using auto imputation mode...\n")
-    cat(sprintf("  NA ratio > %.2f -> Perseus\n", filter_threshold))
-    cat(sprintf("  NA ratio <= %.2f -> KNN\n", filter_threshold))
+    if (is_two_threshold_mode) {
+      cat(sprintf("  NA ratio < %.2f -> KNN\n", threshold_low))
+      cat(sprintf("  %.2f <= NA ratio < %.2f -> Perseus\n",
+                  threshold_low, threshold_high))
+      cat(sprintf("  (Proteins with NA ratio >= %.2f were already filtered out)\n",
+                  threshold_high))
+    } else {
+      cat(sprintf("  NA ratio > %.2f -> Perseus\n", threshold_low))
+      cat(sprintf("  NA ratio <= %.2f -> KNN\n", threshold_low))
+    }
 
     imputed_groups <- list()
 
@@ -1037,15 +1106,29 @@ filter_and_impute <- function(log2_data,
       # Calculate NA ratio for each protein in this group
       na_ratios <- rowSums(is.na(group_data)) / n_samples
 
-      # Classify proteins based on NA threshold
-      knn_proteins <- names(na_ratios[na_ratios <= filter_threshold])
-      perseus_proteins <- names(na_ratios[na_ratios > filter_threshold])
+      # Classify proteins based on NA threshold(s)
+      if (is_two_threshold_mode) {
+        knn_proteins <- names(na_ratios[na_ratios < threshold_low])
+        perseus_proteins <- names(na_ratios[na_ratios >= threshold_low &
+                                            na_ratios < threshold_high])
+      } else {
+        knn_proteins <- names(na_ratios[na_ratios <= threshold_low])
+        perseus_proteins <- names(na_ratios[na_ratios > threshold_low])
+      }
 
-      cat(sprintf(
-        "  Group '%s': %d proteins for KNN (NA <= %.2f), %d proteins for Perseus (NA > %.2f)\n",
-        group, length(knn_proteins), filter_threshold,
-        length(perseus_proteins), filter_threshold
-      ))
+      if (is_two_threshold_mode) {
+        cat(sprintf(
+          "  Group '%s': %d proteins for KNN (NA < %.2f), %d proteins for Perseus (%.2f <= NA < %.2f)\n",
+          group, length(knn_proteins), threshold_low,
+          length(perseus_proteins), threshold_low, threshold_high
+        ))
+      } else {
+        cat(sprintf(
+          "  Group '%s': %d proteins for KNN (NA <= %.2f), %d proteins for Perseus (NA > %.2f)\n",
+          group, length(knn_proteins), threshold_low,
+          length(perseus_proteins), threshold_low
+        ))
+      }
 
       # Initialize result matrix
       imputed_group_data <- group_data
@@ -1107,7 +1190,12 @@ filter_and_impute <- function(log2_data,
         Accession = names(na_ratios),
         Group = group,
         NA_Ratio = round(na_ratios, 4),
-        Method_Used = ifelse(na_ratios > filter_threshold, "Perseus", "KNN"),
+        Method_Used = if (is_two_threshold_mode) {
+          ifelse(na_ratios < threshold_low, "KNN",
+                 ifelse(na_ratios < threshold_high, "Perseus", "Filtered"))
+        } else {
+          ifelse(na_ratios > threshold_low, "Perseus", "KNN")
+        },
         stringsAsFactors = FALSE
       )
       auto_report <- rbind(auto_report, group_report)
