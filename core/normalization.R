@@ -413,18 +413,18 @@ normalize_by_median <- function(expression_data,
         if (sum(common_proteins) == 0) {
           warning(paste("No common proteins in group:", group,
                        ". Using all proteins for this group."))
-          means <- apply(group_data, 2, function(x) mean(x, na.rm = TRUE))
+          group_medians <- apply(group_data, 2, function(x) median(x, na.rm = TRUE))
         } else {
-          means <- apply(group_data[common_proteins, , drop = FALSE], 2,
-                        function(x) mean(x, na.rm = TRUE))
+          group_medians <- apply(group_data[common_proteins, , drop = FALSE], 2,
+                        function(x) median(x, na.rm = TRUE))
           cat("Group", group, ":", sum(common_proteins), "common proteins used.\n")
         }
       } else {
-        means <- apply(group_data, 2, function(x) mean(x, na.rm = TRUE))
+        group_medians <- apply(group_data, 2, function(x) median(x, na.rm = TRUE))
       }
 
       # Calculate normalization factors
-      norm_factors <- mean(means) / means
+      norm_factors <- mean(group_medians) / group_medians
       # Apply normalization
       normalized_data[, valid_samples] <- sweep(group_data, 2, norm_factors, FUN = "*")
     }
