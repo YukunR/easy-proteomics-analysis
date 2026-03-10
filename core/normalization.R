@@ -863,6 +863,12 @@ impute_perseus_style <- function(expression_matrix,
     # Handle non-finite values
     column[!is.finite(column)] <- NA
 
+    # Skip imputation for all-NA columns to avoid silent NaN fill
+    if (all(is.na(column))) {
+      warning("A column is entirely NA; Perseus-style imputation skipped for this column.")
+      return(column)
+    }
+
     # Calculate statistical parameters
     column_sd <- sd(column, na.rm = TRUE)
     column_mean <- mean(column, na.rm = TRUE)
@@ -959,6 +965,13 @@ filter_and_impute <- function(log2_data,
     threshold_low <- filter_threshold[1]
     threshold_high <- filter_threshold[1]
     is_two_threshold_mode <- FALSE
+
+    if (threshold_low < 0 || threshold_low > 1) {
+      stop(sprintf(
+        "Invalid filter_threshold: value (%.2f) must be between 0 and 1",
+        threshold_low
+      ))
+    }
   } else {
     threshold_low <- filter_threshold[1]
     threshold_high <- filter_threshold[2]
