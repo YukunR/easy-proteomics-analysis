@@ -626,8 +626,6 @@ create_distribution_plots <- function(melted_data,
 #' @return List containing the combined plot and color scheme for reuse
 #'
 #' @export
-#'
-#' @export
 visualize_normalization_workflow <- function(raw_data,
                                              normalized_data,
                                              imputed_data,
@@ -961,13 +959,6 @@ filter_and_impute <- function(log2_data,
     threshold_low <- filter_threshold[1]
     threshold_high <- filter_threshold[1]
     is_two_threshold_mode <- FALSE
-
-    if (threshold_low < 0 || threshold_low > 1) {
-      stop(sprintf(
-        "Invalid filter_threshold: value (%.2f) must be between 0 and 1",
-        threshold_low
-      ))
-    }
   } else {
     threshold_low <- filter_threshold[1]
     threshold_high <- filter_threshold[2]
