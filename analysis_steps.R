@@ -667,7 +667,7 @@ run_proteomics_analysis <- function(project_name = "proteomics_project", force_r
   # Get current comparison names from config
   current_comparison_names <- sapply(config$comparisons, function(x) x$name)
 
-  for (i in 1:length(config$comparisons)) {
+  for (i in seq_along(config$comparisons)) {
     comparison <- config$comparisons[[i]]
     group_name <- comparison$name
     step_name <- paste0("differential_analysis_", group_name)
@@ -762,7 +762,7 @@ print_config <- function() {
   cat("\n--- Comparisons ---\n")
   cat("Number of comparisons:", length(config$comparisons), "\n")
   if (length(config$comparisons) > 0) {
-    for (i in 1:length(config$comparisons)) {
+    for (i in seq_along(config$comparisons)) {
       comp <- config$comparisons[[i]]
       ctrl_str <- if (length(comp$control) > 1) paste(comp$control, collapse = "+") else comp$control
       treat_str <- if (length(comp$treatment) > 1) paste(comp$treatment, collapse = "+") else comp$treatment
