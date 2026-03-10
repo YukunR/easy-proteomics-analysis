@@ -373,6 +373,14 @@ normalize_by_median <- function(expression_data,
     } else {
       medians <- apply(expression_data, 2, function(x) median(x, na.rm = TRUE))
     }
+    if (any(medians == 0, na.rm = TRUE)) {
+      zero_samples <- names(medians)[!is.na(medians) & medians == 0]
+      stop(paste(
+        "Normalization failed: median is 0 for sample(s):",
+        paste(zero_samples, collapse = ", "),
+        "\nCheck for all-zero or all-NA columns in expression data."
+      ))
+    }
     norm_factors <- mean(medians) / medians
     normalized_data <- sweep(expression_data, 2, norm_factors, FUN = "*")
 
@@ -424,6 +432,14 @@ normalize_by_median <- function(expression_data,
       }
 
       # Calculate normalization factors
+      if (any(group_medians == 0, na.rm = TRUE)) {
+        zero_samples <- names(group_medians)[!is.na(group_medians) & group_medians == 0]
+        stop(paste(
+          "Normalization failed: median is 0 for sample(s) in group", group, ":",
+          paste(zero_samples, collapse = ", "),
+          "\nCheck for all-zero or all-NA columns in expression data."
+        ))
+      }
       norm_factors <- mean(group_medians) / group_medians
       # Apply normalization
       normalized_data[, valid_samples] <- sweep(group_data, 2, norm_factors, FUN = "*")
