@@ -89,7 +89,8 @@ classify_regulation <- function(gene_data,
                                 p_column = "p",
                                 fc_threshold = 1.5,
                                 p_threshold = 0.05,
-                                gene_column = "Accession") {
+                                gene_column = "Accession",
+                                is_log2 = NULL) {
   # Input validation
   if (!is.data.frame(gene_data)) {
     stop("gene_data must be a data frame")
@@ -126,18 +127,25 @@ classify_regulation <- function(gene_data,
   fc_values <- gene_data[[fc_column]]
   p_values <- gene_data[[p_column]]
 
-  # Detect if fold change is log2 transformed
-  if (all(abs(fc_values) <= 15, na.rm = TRUE) && any(fc_values < 0, na.rm = TRUE)) {
-    message("Fold change values appear to be log2 transformed")
-    log2_fc <- fc_values
-    up_threshold <- log2(fc_threshold)
-    down_threshold <- -log2(fc_threshold)
-  } else {
-    message("Converting fold change to log2 scale")
-    log2_fc <- log2(fc_values)
-    up_threshold <- log2(fc_threshold)
-    down_threshold <- -log2(fc_threshold)
+  # Determine if fold change is already log2 transformed
+  if (is.null(is_log2)) {
+    # Auto-detect (heuristic): treat as log2 only if all |values| <= 15 AND some are negative
+    if (all(abs(fc_values) <= 15, na.rm = TRUE) && any(fc_values < 0, na.rm = TRUE)) {
+      message("Fold change values appear to be log2 transformed (auto-detected)")
+      is_log2 <- TRUE
+    } else {
+      message("Converting fold change to log2 scale (auto-detected)")
+      is_log2 <- FALSE
+    }
   }
+
+  if (is_log2) {
+    log2_fc <- fc_values
+  } else {
+    log2_fc <- log2(fc_values)
+  }
+  up_threshold <- log2(fc_threshold)
+  down_threshold <- -log2(fc_threshold)
 
   # Classify regulation groups
   gene_data$regulation_group <- case_when(
@@ -350,11 +358,13 @@ create_volcano_plot <- function(gene_data,
                                 label_size = 3,
                                 theme_style = "publication",
                                 show_stats = TRUE,
-                                xlim_symmetric = TRUE) {
+                                xlim_symmetric = TRUE,
+                                is_log2 = NULL) {
   # Step 1: Classify regulation groups
   classified_data <- classify_regulation(
     gene_data, fc_column, p_column,
-    fc_threshold, p_threshold, gene_column
+    fc_threshold, p_threshold, gene_column,
+    is_log2 = is_log2
   )
 
   # Step 2: Prepare annotations
