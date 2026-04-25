@@ -130,7 +130,7 @@ classify_regulation <- function(gene_data,
   # Determine if fold change is already log2 transformed
   if (is.null(is_log2)) {
     # Auto-detect (heuristic): treat as log2 only if all |values| <= 15 AND some are negative
-    if (all(abs(fc_values) <= 15, na.rm = TRUE) && any(fc_values < 0, na.rm = TRUE)) {
+    if (all(abs(fc_values) <= 100, na.rm = TRUE) && any(fc_values < 0, na.rm = TRUE)) {
       message("Fold change values appear to be log2 transformed (auto-detected)")
       is_log2 <- TRUE
     } else {

@@ -6,3 +6,5 @@ renv/
 *.Rproj
 
 res*
+tools
+data/unequal median
