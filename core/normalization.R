@@ -834,10 +834,16 @@ generate_sample_colors <- function(sample_info,
 #' Imputes missing values using random numbers from a normal distribution with downshifted mean
 #' and shrunken standard deviation, similar to Perseus software methodology
 #'
-#' @param expression_matrix Expression data matrix
+#' @param expression_matrix Expression data matrix (the matrix whose NAs will be filled)
 #' @param width Scaling factor for imputed distribution standard deviation relative to sample standard deviation, default 0.3
 #' @param downshift Downshift of imputed distribution mean from sample mean (in units of sample standard deviation), default 1.8
 #' @param seed Random seed, default 100
+#' @param stats_source Optional matrix (same columns/sample order as
+#'   \code{expression_matrix}) whose observed values are used to estimate the
+#'   per-sample mean/sd of the down-shifted imputation distribution. Defaults to
+#'   \code{expression_matrix} itself (backward compatible). Supply the full group
+#'   matrix when imputing only a high-missing subset, so that columns empty
+#'   within the subset still obtain valid distribution parameters.
 #'
 #' @return Matrix with imputed values
 #'
@@ -845,9 +851,17 @@ generate_sample_colors <- function(sample_info,
 impute_perseus_style <- function(expression_matrix,
                                  width = 0.3,
                                  downshift = 1.8,
-                                 seed = 100) {
+                                 seed = 100,
+                                 stats_source = NULL) {
   if (!is.matrix(expression_matrix)) {
     expression_matrix <- as.matrix(expression_matrix)
+  }
+
+  # Statistics source: defaults to the matrix being imputed
+  if (is.null(stats_source)) {
+    stats_source <- expression_matrix
+  } else if (!is.matrix(stats_source)) {
+    stats_source <- as.matrix(stats_source)
   }
 
   # Check if data is log-transformed
@@ -859,35 +873,52 @@ impute_perseus_style <- function(expression_matrix,
 
   set.seed(seed)
 
-  imputed_matrix <- apply(expression_matrix, 2, function(column) {
+  # Loop by column index so each column's imputation parameters can be drawn
+  # from the matching column of `stats_source` (column order preserved as in
+  # the original apply(), keeping the rnorm() draw sequence deterministic).
+  imputed_matrix <- expression_matrix
+  for (j in seq_len(ncol(expression_matrix))) {
+    column <- expression_matrix[, j]
     # Handle non-finite values
     column[!is.finite(column)] <- NA
 
-    # Skip imputation for all-NA columns to avoid silent NaN fill
-    if (all(is.na(column))) {
-      warning("A column is entirely NA; Perseus-style imputation skipped for this column.")
-      return(column)
+    n_missing <- sum(is.na(column))
+    if (n_missing == 0) {
+      imputed_matrix[, j] <- column
+      next
+    }
+
+    # Distribution parameters come from the (full) statistics source column
+    ref_column <- stats_source[, j]
+    ref_column[!is.finite(ref_column)] <- NA
+
+    # Skip only when the reference sample has NO observed value at all
+    if (all(is.na(ref_column))) {
+      warning("A sample column has no observed values in the statistics source; Perseus-style imputation skipped for this column.")
+      imputed_matrix[, j] <- column
+      next
     }
 
     # Calculate statistical parameters
-    column_sd <- sd(column, na.rm = TRUE)
-    column_mean <- mean(column, na.rm = TRUE)
+    column_sd <- sd(ref_column, na.rm = TRUE)
+    column_mean <- mean(ref_column, na.rm = TRUE)
+    # A single observed value yields NA sd -> degrade to a constant (sd = 0)
+    if (is.na(column_sd)) {
+      column_sd <- 0
+    }
 
     # Calculate imputation parameters
     shrinked_sd <- width * column_sd
     downshifted_mean <- column_mean - downshift * column_sd
 
     # Impute missing values
-    n_missing <- sum(is.na(column))
-    if (n_missing > 0) {
-      column[is.na(column)] <- rnorm(n_missing,
-        mean = downshifted_mean,
-        sd = shrinked_sd
-      )
-    }
+    column[is.na(column)] <- rnorm(n_missing,
+      mean = downshifted_mean,
+      sd = shrinked_sd
+    )
 
-    return(column)
-  })
+    imputed_matrix[, j] <- column
+  }
 
   cat("Perseus-style imputation completed.\n")
   cat("Parameters: width =", width, ", downshift =", downshift, ", seed =", seed, "\n")
@@ -1177,7 +1208,11 @@ filter_and_impute <- function(log2_data,
         perseus_data <- group_data[perseus_proteins, , drop = FALSE]
         # Only apply Perseus if there are missing values
         if (any(is.na(perseus_data))) {
-          perseus_imputed <- impute_perseus_style(as.matrix(perseus_data))
+          # Estimate per-sample distribution from the FULL group (all proteins),
+          # so columns empty within the high-missing subset still get valid
+          # parameters; only the subset's NAs are filled.
+          perseus_imputed <- impute_perseus_style(as.matrix(perseus_data),
+                                                  stats_source = as.matrix(group_data))
           imputed_group_data[perseus_proteins, ] <- perseus_imputed
         }
       }
